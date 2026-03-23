@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AUSUB 平均最优解（组合）</title>
+  <style>
+    :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--gold:#9a6818;--gold2:#c58b2a;--good:#1f6b3c;--bad:#973939}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
+    .wrap{max-width:1400px;margin:0 auto;padding:24px}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:12px}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    input,button,select{padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+    button{cursor:pointer}
+    .primary{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#fff;border:0;border-radius:999px;padding:10px 16px}
+    .danger{background:#a53f3f;color:#fff;border:0;border-radius:999px;padding:10px 16px}
+    .meta{font-size:12px;color:var(--muted)}
+    .tabs{display:flex;gap:6px;margin:12px 0}
+    .tab{padding:8px 16px;border:1px solid var(--line);border-radius:999px;cursor:pointer;background:#fff;font-size:13px}
+    .tab.active{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#fff;border-color:transparent}
+    .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+    .card{padding:12px;border:1px solid var(--line);border-radius:14px;background:#fff}
+    .k{font-size:12px;color:var(--muted)} .v{font-size:20px;font-weight:700}
+    .good{color:var(--good)} .bad{color:var(--bad)}
+    .layout{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .table-wrap{max-height:500px;overflow:auto;border:1px solid var(--line);border-radius:14px;background:#fff}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{border-bottom:1px solid #eee4d3;padding:8px 6px;text-align:left}
+    th{position:sticky;top:0;background:#fff;color:var(--muted)}
+    tbody tr{cursor:pointer} tbody tr.selected{background:#f8f0df}
+    .detail{border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff}
+    pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.5 Consolas,"Courier New",monospace}
+    a{color:var(--gold);text-decoration:none}
+    @media(max-width:1000px){.cards{grid-template-columns:repeat(3,1fr)}.layout{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <div class="row">
+        <h2 style="margin:0">平均最优解（组合）</h2>
+        <a href="/">← 返回主页</a>
+        <a href="/admin">后台管理</a>
+      </div>
+      <div class="meta" style="margin-top:6px">三资产组合（黄金+沪深300+标普500），每组参数在多个随机时间窗口上回测，综合评分找出跨周期稳定的全局最优组合配置。</div>
+    </div>
+
+    <div class="panel">
+      <div id="statusText" class="meta">加载中...</div>
+    </div>
+
+    <div class="tabs" id="yearTabs"></div>
+
+    <div class="cards">
+      <div class="card"><div class="k">最佳稳健评分</div><div class="v" id="vBestRobust">-</div></div>
+      <div class="card"><div class="k">最佳平均分</div><div class="v" id="vBestAvg">-</div></div>
+      <div class="card"><div class="k">最佳最低分</div><div class="v" id="vBestMin">-</div></div>
+      <div class="card"><div class="k">已测试</div><div class="v" id="vAttempts">0</div></div>
+      <div class="card"><div class="k">有效结果</div><div class="v" id="vValid">0</div></div>
+    </div>
+
+    <div class="layout">
+      <div class="panel" style="padding:0">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>#</th><th>稳健分</th><th>平均分</th><th>最低分</th><th>最高分</th><th>标准差</th><th>窗口数</th><th>黄金</th><th>沪深300</th><th>标普500</th>
+            </tr></thead>
+            <tbody id="rows"><tr><td colspan="10">选择定投周期查看结果...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <div class="detail">
+          <div class="k" style="margin-bottom:6px">选中策略的参数与各窗口表现</div>
+          <pre id="detail">点击左侧任意一行查看详情。</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let selectedYear = 3;
+    let selectedIdx = 0;
+    let entries = [];
+    let lastMeta = {};
+    const pct = v => `${(v*100).toFixed(2)}%`;
+    const money = v => Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2});
+
+    async function callApi(path,method,body){
+      const r=await fetch(path,{method:method||"GET",headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
+      if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json();
+    }
+
+    // 渲染年份 tabs
+    function renderTabs(){
+      yearTabs.innerHTML="";
+      for(let y=2;y<=8;y++){
+        const d=document.createElement("div");
+        d.className="tab"+(y===selectedYear?" active":"");
+        d.textContent=y+"年";
+        d.onclick=()=>{selectedYear=y;selectedIdx=0;renderTabs();refresh();};
+        yearTabs.appendChild(d);
+      }
+    }
+
+    function formatCfg(entry){
+      if(!entry)return "";
+      const w=entry.weights||{};
+      const cfgMap=entry.configs||{};
+      const hasPortfolio=Object.keys(cfgMap).length>0;
+      if(!hasPortfolio&&entry.cfg){
+        // 旧格式：单资产
+        const cfg=entry.cfg;
+        const buyMode=cfg.buyMode==="intraday_break_same_close"?"盘中跌破，当日收盘":"收盘确认，次日收盘";
+        const schedule=cfg.scheduleMode==="weekly_weekday"
+          ?`每周${["-","周一","周二","周三","周四","周五"][cfg.scheduleWeekday]||cfg.scheduleWeekday}`
+          :`每 ${cfg.scheduleDays} 个交易日`;
+        const p=v=>`${(Number(v)*100).toFixed(2)}%`;
+        return [
+          `[旧版单资产结果]`,
+          `基础: ${cfg.baseAmount}  追加: ${cfg.dipAmount}  定投: ${schedule}  买入: ${buyMode}`,
+          `均线: ${cfg.maWindow}  动态: ${cfg.dynamicEnabled?"启用":"关闭"}`,
+          `倍率: ${cfg.oversoldMultiplier}/${cfg.weakMultiplier}/${cfg.neutralMultiplier}/${cfg.hotMultiplier}`,
+          `RSI: ${cfg.oversoldRsi}/${cfg.weakRsiMax}/${cfg.hotRsi}  MA20: ${p(cfg.discountToMa20)}/${p(cfg.premiumToMa20)}`,
+          `卖出1: ${p(cfg.sell1Premium)} RSI≥${cfg.sell1Rsi} ${p(cfg.sell1Pct)}  卖出2: ${p(cfg.sell2Premium)} ${p(cfg.sell2Pct)}  卖出3: ${p(cfg.sell3Premium)} RSI≥${cfg.sell3Rsi} ${p(cfg.sell3Pct)}`,
+        ].join("\n");
+      }
+      // 新格式：组合
+      const lines=[`黄金: ${((w.au9999||0)*100).toFixed(0)}%  沪深300: ${((w.csi300||0)*100).toFixed(0)}%  标普500: ${((w.sp500||0)*100).toFixed(0)}%`,""];
+      const labels={au9999:"黄金AU9999",csi300:"沪深300",sp500:"标普500"};
+      for(const key of ["au9999","csi300","sp500"]){
+        const cfg=cfgMap[key];if(!cfg)continue;
+        const buyMode=cfg.buyMode==="intraday_break_same_close"?"盘中跌破，当日收盘":"收盘确认，次日收盘";
+        const schedule=cfg.scheduleMode==="weekly_weekday"
+          ?`每周${["-","周一","周二","周三","周四","周五"][cfg.scheduleWeekday]||cfg.scheduleWeekday}`
+          :`每 ${cfg.scheduleDays} 个交易日`;
+        const p=v=>`${(Number(v)*100).toFixed(2)}%`;
+        lines.push(`--- ${labels[key]} (${((w[key]||0)*100).toFixed(0)}%) ---`);
+        lines.push(`基础: ${cfg.baseAmount}  追加: ${cfg.dipAmount}  定投: ${schedule}  买入: ${buyMode}`);
+        lines.push(`均线: ${cfg.maWindow}  动态: ${cfg.dynamicEnabled?"启用":"关闭"}`);
+        lines.push(`倍率: ${cfg.oversoldMultiplier}/${cfg.weakMultiplier}/${cfg.neutralMultiplier}/${cfg.hotMultiplier}`);
+        lines.push(`RSI: ${cfg.oversoldRsi}/${cfg.weakRsiMax}/${cfg.hotRsi}  MA20: ${p(cfg.discountToMa20)}/${p(cfg.premiumToMa20)}`);
+        lines.push(`卖出1: ${p(cfg.sell1Premium)} RSI≥${cfg.sell1Rsi} ${p(cfg.sell1Pct)}  卖出2: ${p(cfg.sell2Premium)} ${p(cfg.sell2Pct)}  卖出3: ${p(cfg.sell3Premium)} RSI≥${cfg.sell3Rsi} ${p(cfg.sell3Pct)}`);
+        lines.push("");
+      }
+      return lines.join("\n");
+    }
+
+    function formatDetail(entry){
+      if(!entry)return "点击左侧任意一行查看详情。";
+      const w=entry.weights||{};
+      const hasW=Object.keys(w).length>0;
+      const lines=[
+        `稳健评分: ${entry.robustScore}  平均: ${entry.avgScore}  最低: ${entry.minScore}  最高: ${entry.maxScore}  标准差: ${entry.stdDev}`,
+        `覆盖窗口: ${entry.windowCount} 个  定投周期: ${entry.windowYears||selectedYear} 年`,
+      ];
+      if(hasW) lines.push(`资产配比: 黄金${((w.au9999||0)*100).toFixed(0)}% 沪深300 ${((w.csi300||0)*100).toFixed(0)}% 标普500 ${((w.sp500||0)*100).toFixed(0)}%`);
+      lines.push("","=== 参数 ===",formatCfg(entry),"","=== 各窗口表现 ===");
+      if(entry.details&&entry.details.length){
+        lines.push("时间段        评分      收益率      总投入        最终市值      交易数");
+        entry.details.forEach(d=>{
+          lines.push(`${d.range.padEnd(14)}${String(d.score.toFixed(2)).padStart(8)}  ${pct(d.returnRate).padStart(10)}  ${money(d.totalInvested).padStart(12)}  ${money(d.finalValue).padStart(12)}  ${String(d.tradeCount).padStart(6)}`);
+          if(d.assetDetails&&d.assetDetails.length){
+            d.assetDetails.forEach(a=>{
+              if(a.skipped)return;
+              lines.push(`  └ ${a.label}(${((a.weight||0)*100).toFixed(0)}%): ${pct(a.returnRate).padStart(10)}  ${money(a.totalInvested).padStart(12)}  ${money(a.finalValue).padStart(12)}  ${String(a.tradeCount).padStart(6)}`);
+            });
+          }
+        });
+      }
+      return lines.join("\n");
+    }
+
+    function render(data){
+      entries=data.entries||[];
+      const meta=data.meta||{};
+      lastMeta=meta;
+      vAttempts.textContent=meta.attempts||0;
+      vValid.textContent=meta.valid||0;
+      statusText.textContent=`${meta.running?"搜索中":"已停止"} | 窗口数: ${meta.windowCount||"-"} | 数据: ${meta.minYear||"-"}-${meta.maxYear||"-"} | 当前: ${selectedYear}年周期`;
+      const best=entries[0];
+      vBestRobust.textContent=best?best.robustScore.toFixed(2):"-";
+      vBestAvg.textContent=best?best.avgScore.toFixed(2):"-";
+      vBestMin.textContent=best?best.minScore.toFixed(2):"-";
+      if(!entries.length){
+        rows.innerHTML='<tr><td colspan="10">该周期暂无搜索结果...</td></tr>';
+        detail.textContent=formatDetail(null);return;
+      }
+      if(selectedIdx>=entries.length)selectedIdx=0;
+      rows.innerHTML=entries.map((e,i)=>{
+        const w=e.weights||{};
+        return `<tr data-i="${i}" class="${i===selectedIdx?"selected":""}">
+          <td>${i+1}</td><td>${e.robustScore.toFixed(2)}</td><td>${e.avgScore.toFixed(2)}</td>
+          <td class="${e.minScore>=0?"good":"bad"}">${e.minScore.toFixed(2)}</td>
+          <td>${e.maxScore.toFixed(2)}</td><td>${e.stdDev.toFixed(2)}</td><td>${e.windowCount}</td>
+          <td>${((w.au9999||0)*100).toFixed(0)}%</td>
+          <td>${((w.csi300||0)*100).toFixed(0)}%</td>
+          <td>${((w.sp500||0)*100).toFixed(0)}%</td></tr>`;
+      }).join("");
+      detail.textContent=formatDetail(entries[selectedIdx]);
+    }
+
+    rows.onclick=e=>{const tr=e.target.closest("tr[data-i]");if(!tr)return;selectedIdx=Number(tr.dataset.i);render({entries,meta:lastMeta});};
+
+    async function refresh(){
+      try{
+        const data=await callApi(`/api/robust/leaderboard?year=${selectedYear}&limit=10`);
+        render(data);
+      }catch(err){statusText.textContent=`刷新失败: ${err.message}`;}
+    }
+
+    renderTabs();refresh();setInterval(refresh,5000);
+  </script>
+</body>
+</html>

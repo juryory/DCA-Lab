@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AUSUB 定投策略优化平台</title>
+  <style>
+    :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--gold:#9a6818;--gold2:#c58b2a;--good:#1f6b3c;--bad:#973939}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
+    .wrap{max-width:900px;margin:0 auto;padding:40px 20px}
+    .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px}
+    .header h1{margin:0;font-size:24px}
+    .header a{color:var(--gold);font-size:13px;text-decoration:none}
+    .header a:hover{text-decoration:underline}
+    .cards{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:32px 28px;cursor:pointer;transition:box-shadow .2s,transform .15s;text-decoration:none;color:var(--text);display:block}
+    .card:hover{box-shadow:0 6px 24px rgba(0,0,0,.08);transform:translateY(-2px)}
+    .card h2{margin:0 0 10px;font-size:20px;color:var(--gold)}
+    .card p{margin:0;color:var(--muted);font-size:14px;line-height:1.6}
+    .card .icon{font-size:36px;margin-bottom:12px}
+    .footer{margin-top:40px;text-align:center;color:var(--muted);font-size:12px}
+    .footer a{color:var(--gold);text-decoration:none}
+    @media(max-width:600px){.cards{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <h1>AUSUB 定投策略优化平台</h1>
+      <a href="/admin" id="adminLink">后台管理</a>
+    </div>
+    <div class="cards">
+      <a class="card" href="/range.html">
+        <div class="icon">📊</div>
+        <h2>区间最优解</h2>
+        <p>选定时间范围，寻找该区间内最优的三资产组合定投策略（黄金+沪深300+标普500）。</p>
+      </a>
+      <a class="card" href="/robust">
+        <div class="icon">🏆</div>
+        <h2>平均最优解</h2>
+        <p>寻找不同定投周期（2-8年）下的三资产组合平均最优解。找出跨周期稳定的全局最优配置。</p>
+      </a>
+    </div>
+    <div class="footer">
+      <a href="/lab">策略实验室</a> · 黄金+沪深300+标普500 组合定投回测
+    </div>
+  </div>
+</body>
+</html>

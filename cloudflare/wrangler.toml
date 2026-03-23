@@ -1,0 +1,10 @@
+name = "ausub-api"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[[kv_namespaces]]
+binding = "STORE"
+id = "YOUR_KV_NAMESPACE_ID"
+
+[vars]
+ADMIN_TOKEN = "change_me_to_your_secret"

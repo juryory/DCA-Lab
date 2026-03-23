@@ -1,0 +1,472 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AUSUB Strategy Lab</title>
+  <style>
+    :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--gold:#9a6818;--gold2:#c58b2a;--good:#1f6b3c;--bad:#973939}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
+    .wrap{max-width:1400px;margin:0 auto;padding:24px}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:18px}
+    .hero{margin-bottom:16px;background:linear-gradient(135deg,#fffaf0,#f6ecd9)}
+    h1,h2,h3{margin:0 0 10px}.sub{color:var(--muted)} .hidden{display:none!important}
+    .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+    .choice{cursor:pointer}.choice:hover{outline:2px solid rgba(154,104,24,.25)}
+    .layout{display:grid;grid-template-columns:420px 1fr;gap:16px}
+    .field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:10px}
+    textarea{min-height:210px;resize:vertical;font:12px/1.4 Consolas,"Courier New",monospace}
+    label{font-size:12px;color:var(--muted)}
+    button{border:0;border-radius:999px;padding:10px 14px;cursor:pointer}
+    .primary{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#fff}
+    .ghost{background:#f3ead8;color:var(--text)}
+    .danger{background:#a53f3f;color:#fff}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}
+    .card{padding:12px;border:1px solid var(--line);border-radius:14px;background:#fff}
+    .k{font-size:12px;color:var(--muted)} .v{font-size:22px;font-weight:700}
+    .good{color:var(--good)} .bad{color:var(--bad)}
+    .table-wrap{max-height:500px;overflow:auto;border:1px solid var(--line);border-radius:14px;background:#fff}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{border-bottom:1px solid #eee4d3;padding:8px 6px;text-align:left}
+    th{position:sticky;top:0;background:#fff;color:var(--muted)}
+    #randomRows tr{cursor:pointer}
+    #randomRows tr.selected{background:#f8f0df}
+    .detail{margin-top:10px;border:1px solid var(--line);border-radius:12px;background:#fff;padding:10px}
+    .detail pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.5 Consolas,"Courier New",monospace}
+    .status{font-size:12px;color:var(--muted);min-height:18px;margin-top:8px}
+    @media (max-width:1100px){.grid2,.layout,.cards{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel hero">
+      <h1>AUSUB Strategy Lab</h1>
+      <div class="sub">提供两个入口：手动参数回测，或持续随机搜索并实时维护 Top 50 最优组合。</div>
+    </div>
+
+    <div id="home" class="panel">
+      <h2>选择模式</h2>
+      <div class="grid2">
+        <div class="panel choice" id="goManual">
+          <h3>手动输入参数</h3>
+          <div class="sub">单组回测，适合手动调整定投金额、动态倍率、加仓和卖出规则。</div>
+        </div>
+        <div class="panel choice" id="goRandom">
+          <h3>随机搜索</h3>
+          <div class="sub">点击开始后持续随机抽样，实时展示前 50 条最优策略，直到手动停止。</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="manual" class="hidden">
+      <div class="actions" style="margin-bottom:12px"><button class="ghost" data-back>返回首页</button></div>
+      <div class="layout">
+        <div class="panel">
+          <h2>手动参数</h2>
+          <div class="field"><label>上传 CSV</label><input id="manualFiles" type="file" accept=".csv" multiple></div>
+          <div class="grid">
+            <div class="field"><label>基础定投金额</label><input id="mBaseAmount" type="number" value="500" step="100"></div>
+            <div class="field"><label>追加金额</label><input id="mDipAmount" type="number" value="100" step="100"></div>
+            <div class="field"><label>定投模式</label><select id="mScheduleMode"><option value="every_n_days">每 N 个交易日</option><option value="weekly_weekday">每周固定星期</option></select></div>
+            <div class="field"><label>定投周期/星期</label><input id="mScheduleValue" type="number" value="20"></div>
+            <div class="field"><label>买入方式</label><select id="mBuyMode"><option value="close_confirm_next_close">收盘确认，次日收盘成交</option><option value="intraday_break_same_close">盘中跌破，当日收盘成交</option></select></div>
+            <div class="field"><label>均线窗口</label><input id="mMaWindow" type="number" value="20"></div>
+            <div class="field"><label>启用动态定投</label><select id="mDynamic"><option value="true">启用</option><option value="false">关闭</option></select></div>
+            <div class="field"><label>极弱/偏弱/中性/偏热倍率</label><input id="mMultipliers" type="text" value="1.6,1.2,1.0,0.7"></div>
+            <div class="field"><label>极弱 RSI/偏弱上限/偏热 RSI</label><input id="mRsiTriplet" type="text" value="35,45,68"></div>
+            <div class="field"><label>低于 MA20 阈值(%)</label><input id="mDiscount" type="number" value="-3" step="0.5"></div>
+            <div class="field"><label>高于 MA20 阈值(%)</label><input id="mPremium" type="number" value="5" step="0.5"></div>
+            <div class="field"><label>偏弱回撤/极弱回撤(%)</label><input id="mDrawdown" type="text" value="4,8"></div>
+            <div class="field"><label>第一档卖出：高于 MA20(%)</label><input id="mSell1Premium" type="number" value="10" step="0.5"></div>
+            <div class="field"><label>第一档卖出：RSI</label><input id="mSell1Rsi" type="number" value="70"></div>
+            <div class="field"><label>第一档卖出：比例(%)</label><input id="mSell1Pct" type="number" value="10"></div>
+            <div class="field"><label>第二档卖出：高于 MA20(%)</label><input id="mSell2Premium" type="number" value="12" step="0.5"></div>
+            <div class="field"><label>第二档卖出：比例(%)</label><input id="mSell2Pct" type="number" value="15"></div>
+            <div class="field"><label>第二档布林缓冲(%)</label><input id="mSell2Buffer" type="number" value="0" step="0.2"></div>
+            <div class="field"><label>第三档卖出：高于 MA20(%)</label><input id="mSell3Premium" type="number" value="15" step="0.5"></div>
+            <div class="field"><label>第三档卖出：RSI</label><input id="mSell3Rsi" type="number" value="75"></div>
+            <div class="field"><label>第三档卖出：比例(%)</label><input id="mSell3Pct" type="number" value="20"></div>
+          </div>
+          <div class="actions"><button class="primary" id="runManual">运行回测</button><button class="ghost" id="loadDefaults">恢复默认</button></div>
+          <div class="status" id="manualStatus">等待上传 CSV。</div>
+        </div>
+        <div class="panel">
+          <div class="cards">
+            <div class="card"><div class="k">总投入</div><div class="v" id="manualInvested">-</div></div>
+            <div class="card"><div class="k">最终市值</div><div class="v" id="manualValue">-</div></div>
+            <div class="card"><div class="k">收益率</div><div class="v" id="manualReturn">-</div></div>
+            <div class="card"><div class="k">平均成本</div><div class="v" id="manualCost">-</div></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>交易日期</th><th>成交价</th><th>金额</th><th>数量</th><th>类型</th><th>原因</th></tr></thead>
+              <tbody id="manualRows"><tr><td colspan="6">暂无结果。</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="random" class="hidden">
+      <div class="actions" style="margin-bottom:12px"><button class="ghost" data-back>返回首页</button></div>
+      <div class="layout">
+        <div class="panel">
+          <h2>随机搜索</h2>
+          <div class="field"><label>上传 CSV</label><input id="randomFiles" type="file" accept=".csv" multiple></div>
+          <div class="grid">
+            <div class="field"><label>开始年份</label><input id="rStartYear" type="number" value="2019"></div>
+            <div class="field"><label>结束年份</label><input id="rEndYear" type="number" value="2021"></div>
+            <div class="field"><label>每轮抽样数量</label><input id="rBatch" type="number" value="100"></div>
+            <div class="field"><label>保留前几名</label><input id="rTop" type="number" value="50"></div>
+            <div class="field"><label>交易惩罚权重</label><input id="rPenalty" type="number" value="0.08" step="0.01"></div>
+          </div>
+          <div class="actions"><button class="primary" id="startRandom">确认并开始任务</button><button class="danger" id="stopRandom">停止全部任务</button></div>
+          <div class="status" id="randomStatus">请输入时间范围并启动任务。</div>
+          <div class="status" id="randomMeta">状态：未开始 | 抽样：0 | 有效：0</div>
+        </div>
+        <div class="panel">
+          <div class="cards">
+            <div class="card"><div class="k">全局最佳评分</div><div class="v" id="bestScore">-</div></div>
+            <div class="card"><div class="k">全局最佳收益率</div><div class="v" id="bestReturn">-</div></div>
+            <div class="card"><div class="k">进行中任务</div><div class="v" id="bestInvested">-</div></div>
+            <div class="card"><div class="k">任务总数</div><div class="v" id="bestValue">-</div></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>排名</th><th>时间范围</th><th>最佳评分</th><th>最佳收益率</th><th>抽样</th><th>有效</th><th>状态</th></tr></thead>
+              <tbody id="randomRows"><tr><td colspan="7">尚未创建任务。</td></tr></tbody>
+            </table>
+          </div>
+          <div class="detail">
+            <div class="k">选中时间范围的最优因子参数</div>
+            <pre id="randomDetail">点击上方任意一行，查看该时间范围下最优策略参数。</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <script>
+    const S={manualBars:[],randomBars:[],manualResult:null,running:false,timer:null,attempts:0,valid:0,top:[],seen:new Set(),selectedRandomIndex:null,taskStatus:null};
+    const money=v=>Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2});
+    const pct=v=>`${(v*100).toFixed(2)}%`;
+    const num=v=>Number(v).toLocaleString("zh-CN",{minimumFractionDigits:4,maximumFractionDigits:4});
+    const show=n=>{home.classList.toggle("hidden",n!=="home");manual.classList.toggle("hidden",n!=="manual");random.classList.toggle("hidden",n!=="random")};
+
+    function splitCsvLine(line){const out=[];let cur="",q=false;for(let i=0;i<line.length;i++){const ch=line[i];if(ch=='"'&&line[i+1]=='"'){cur+='"';i++;}else if(ch=='"'){q=!q}else if(ch==","&&!q){out.push(cur);cur=""}else cur+=ch;}out.push(cur);return out;}
+    function parseCsv(t){const lines=t.replace(/\r/g,"").split("\n").filter(Boolean);if(!lines.length)return[];const heads=splitCsvLine(lines[0]);return lines.slice(1).map(line=>{const cols=splitCsvLine(line),row={};heads.forEach((h,i)=>row[h]=cols[i]??"");return row;});}
+    function val(row,names){const m={};Object.keys(row).forEach(k=>m[k.toLowerCase()]=row[k]);for(const n of names)if(m[n.toLowerCase()]!==undefined)return m[n.toLowerCase()];return null;}
+    const pf=v=>{const t=String(v??"").trim().replace(/,/g,"");if(!t)return null;const n=Number(t);return Number.isFinite(n)?n:null;}
+    const pd=v=>{const t=String(v??"").trim().replace(/\D/g,"");return t.length===8?t:null;}
+
+    async function readFiles(files){
+      const map=new Map();
+      for(const file of Array.from(files||[])){
+        const text=await file.text();
+        parseCsv(text).forEach(r=>{
+          const d=pd(val(r,["trade_date","date","日期","交易日期"]));
+          const c=pf(val(r,["close","收盘价","收盘","最新价"]));
+          if(!d||c===null)return;
+          map.set(d,{tradeDate:d,close:c,open:pf(val(r,["open","开盘价"])),high:pf(val(r,["high","最高价"])),low:pf(val(r,["low","最低价"]))});
+        });
+      }
+      return Array.from(map.values()).sort((a,b)=>a.tradeDate.localeCompare(b.tradeDate));
+    }
+
+    const sma=(arr,w)=>arr.slice(-w).reduce((s,v)=>s+v,0)/w;
+    function std(arr,w){const s=arr.slice(-w),a=sma(arr,w);return Math.sqrt(s.reduce((x,v)=>x+((v-a)**2),0)/w);}
+    function rsi(arr,p=14){const d=[];for(let i=1;i<arr.length;i++)d.push(arr[i]-arr[i-1]);const recent=d.slice(-p),g=recent.map(v=>Math.max(v,0)),l=recent.map(v=>Math.abs(Math.min(v,0))),ag=g.reduce((s,v)=>s+v,0)/g.length,al=l.reduce((s,v)=>s+v,0)/l.length;if(al===0)return 100;const rs=ag/al;return 100-(100/(1+rs));}
+    function weekday(ymd){const y=+ymd.slice(0,4),m=+ymd.slice(4,6),d=+ymd.slice(6,8),js=new Date(y,m-1,d).getDay();return js===0?7:js;}
+
+    function classify(closes,c){
+      if(closes.length<60)return["neutral",c.neutralMultiplier];
+      const last=closes.at(-1),ma20=sma(closes,20),ma60=sma(closes,60),rv=rsi(closes,14),hi=Math.max(...closes.slice(-60)),dd=hi>0?(hi-last)/hi:0,v20=(last-ma20)/ma20,v60=(last-ma60)/ma60;
+      if([v20<=c.discountToMa20,rv<=c.oversoldRsi,dd>=c.deepDrawdown,v60<0].filter(Boolean).length>=2)return["oversold",c.oversoldMultiplier];
+      if([v20>=c.premiumToMa20,rv>=c.hotRsi,v60>0,dd<c.drawdownWeak].filter(Boolean).length>=2)return["hot",c.hotMultiplier];
+      if([v20<0,rv>=c.oversoldRsi&&rv<=c.weakRsiMax,dd>=c.drawdownWeak&&dd<c.deepDrawdown].filter(Boolean).length>=2)return["weak",c.weakMultiplier];
+      return["neutral",c.neutralMultiplier];
+    }
+
+    function getManualConfig(){
+      const mults=mMultipliers.value.split(",").map(Number),rsis=mRsiTriplet.value.split(",").map(Number),dds=mDrawdown.value.split(",").map(Number);
+      return{baseAmount:+mBaseAmount.value,dipAmount:+mDipAmount.value,scheduleMode:mScheduleMode.value,scheduleDays:+mScheduleValue.value,scheduleWeekday:+mScheduleValue.value,buyMode:mBuyMode.value,maWindow:+mMaWindow.value,dynamicEnabled:mDynamic.value==="true",oversoldMultiplier:mults[0],weakMultiplier:mults[1],neutralMultiplier:mults[2],hotMultiplier:mults[3],oversoldRsi:rsis[0],weakRsiMax:rsis[1],hotRsi:rsis[2],discountToMa20:+mDiscount.value/100,premiumToMa20:+mPremium.value/100,drawdownWeak:dds[0]/100,deepDrawdown:dds[1]/100,sell1Premium:+mSell1Premium.value/100,sell1Rsi:+mSell1Rsi.value,sell1Pct:+mSell1Pct.value/100,sell2Premium:+mSell2Premium.value/100,sell2Pct:+mSell2Pct.value/100,sell2BollBuffer:+mSell2Buffer.value/100,sell3Premium:+mSell3Premium.value/100,sell3Rsi:+mSell3Rsi.value,sell3Pct:+mSell3Pct.value/100};
+    }
+
+    function runBacktest(bars,c){
+      if(bars.length<Math.max(c.maWindow,60)+2)throw new Error("数据不足");
+      let invested=0,units=0,cash=0,prevBelow=false,addon=false;
+      const pending=[],closes=[],trades=[];
+      for(let i=0;i<bars.length;i++){
+        const b=bars[i];
+        if(pending.length){
+          const todays=pending.splice(0);
+          todays.forEach(o=>{if(o.type==="buy"){const u=o.amount/b.close;units+=u;invested+=o.amount;trades.push({d:b.tradeDate,p:b.close,a:o.amount,u,t:"买入",r:o.reason});}else if(units>0){const su=Math.min(units,units*o.pct),sa=su*b.close;units-=su;cash+=sa;trades.push({d:b.tradeDate,p:b.close,a:sa,u:su,t:"卖出",r:o.reason});}});
+        }
+        closes.push(b.close);
+        if(closes.length<Math.max(c.maWindow,60))continue;
+        const ma=sma(closes,c.maWindow),ma20=sma(closes,20),bollUp=ma20+2*std(closes,20),rv=rsi(closes,14),[state,mult]=classify(closes,c),intraday=c.buyMode==="intraday_break_same_close",belowClose=b.close<ma,belowIntra=(b.low??b.close)<ma,below=intraday?belowIntra:belowClose,prev=i>0?bars[i-1].close:null,next=i+1<bars.length,scheduled=c.scheduleMode==="weekly_weekday"?weekday(b.tradeDate)===c.scheduleWeekday:(i>=c.maWindow&&(i-c.maWindow)%c.scheduleDays===0);
+        if(scheduled){const amt=c.dynamicEnabled?c.baseAmount*mult:c.baseAmount;if(intraday){const u=amt/b.close;units+=u;invested+=amt;trades.push({d:b.tradeDate,p:b.close,a:amt,u,t:"买入",r:`定投(${state},当日收盘成交)`});}else if(next)pending.push({type:"buy",amount:amt,reason:`定投(${state},次日收盘成交)`});}
+        const first=intraday?(below&&!prevBelow):(belowClose&&!prevBelow),follow=addon&&below&&prev!==null&&b.close<prev;
+        if(first||follow){if(intraday){const u=c.dipAmount/b.close;units+=u;invested+=c.dipAmount;trades.push({d:b.tradeDate,p:b.close,a:c.dipAmount,u,t:"买入",r:first?"跌破追加(当日)":"继续追加(当日)"});}else if(next)pending.push({type:"buy",amount:c.dipAmount,reason:first?"跌破追加(次日)":"继续追加(次日)"});addon=true;}
+        if(!below)addon=false;
+        prevBelow=belowClose;
+        const prem=(b.close-ma20)/ma20,s1=units>0&&prem>=c.sell1Premium&&rv>=c.sell1Rsi,s2=units>0&&prem>=c.sell2Premium&&b.close>=bollUp*(1+c.sell2BollBuffer),s3=units>0&&prem>=c.sell3Premium&&rv>=c.sell3Rsi;
+        if(s1&&next)pending.push({type:"sell",pct:c.sell1Pct,reason:"第一档卖出"});
+        if(s2&&next)pending.push({type:"sell",pct:c.sell2Pct,reason:"第二档卖出"});
+        if(s3&&next)pending.push({type:"sell",pct:c.sell3Pct,reason:"第三档卖出"});
+      }
+      const fp=bars.at(-1).close,fv=units*fp+cash;
+      return{config:c,totalInvested:invested,finalValue:fv,returnRate:invested>0?(fv-invested)/invested:0,averageCost:units>0?(invested-cash)/units:0,tradeCount:trades.length,trades};
+    }
+
+    function score(res,w){return Number(((res.returnRate*100)-(res.tradeCount*w)).toFixed(4));}
+
+    function formatConfigDetails(cfg){
+      if(!cfg)return "点击上方任意一行，查看该策略的完整参数。";
+      const buyModeText=cfg.buyMode==="intraday_break_same_close"?"盘中跌破，当日收盘成交":"收盘确认，次日收盘成交";
+      const scheduleModeText=cfg.scheduleMode==="weekly_weekday"?"每周固定星期":"每 N 个交易日";
+      const weekdayText=["-","周一","周二","周三","周四","周五","周六","周日"][cfg.scheduleWeekday]||String(cfg.scheduleWeekday);
+      const boolText=v=>v?"启用":"关闭";
+      const pctText=v=>`${(Number(v)*100).toFixed(2)}%`;
+      const lines=[
+        `基础定投金额: ${cfg.baseAmount}`,
+        `追加金额: ${cfg.dipAmount}`,
+        `定投模式: ${scheduleModeText}`,
+        `定投周期(天): ${cfg.scheduleDays}`,
+        `定投星期: ${weekdayText}`,
+        `买入方式: ${buyModeText}`,
+        `均线窗口: ${cfg.maWindow}`,
+        `动态定投: ${boolText(cfg.dynamicEnabled)}`,
+        `极弱倍率: ${cfg.oversoldMultiplier}`,
+        `偏弱倍率: ${cfg.weakMultiplier}`,
+        `中性倍率: ${cfg.neutralMultiplier}`,
+        `偏热倍率: ${cfg.hotMultiplier}`,
+        `超卖 RSI: ${cfg.oversoldRsi}`,
+        `偏弱 RSI 上限: ${cfg.weakRsiMax}`,
+        `偏热 RSI: ${cfg.hotRsi}`,
+        `低于 MA20 阈值: ${pctText(cfg.discountToMa20)}`,
+        `高于 MA20 阈值: ${pctText(cfg.premiumToMa20)}`,
+        `偏弱回撤阈值: ${pctText(cfg.drawdownWeak)}`,
+        `深度回撤阈值: ${pctText(cfg.deepDrawdown)}`,
+        `第一档卖出溢价: ${pctText(cfg.sell1Premium)}`,
+        `第一档卖出 RSI: ${cfg.sell1Rsi}`,
+        `第一档卖出比例: ${pctText(cfg.sell1Pct)}`,
+        `第二档卖出溢价: ${pctText(cfg.sell2Premium)}`,
+        `第二档卖出比例: ${pctText(cfg.sell2Pct)}`,
+        `第二档布林缓冲: ${pctText(cfg.sell2BollBuffer)}`,
+        `第三档卖出溢价: ${pctText(cfg.sell3Premium)}`,
+        `第三档卖出 RSI: ${cfg.sell3Rsi}`,
+        `第三档卖出比例: ${pctText(cfg.sell3Pct)}`,
+      ];
+      return lines.join("\n");
+    }
+
+    function formatTaskDetails(task){
+      if(!task)return "点击上方任意一行，查看该时间范围下最优策略参数。";
+      if(!task.best||!task.best.cfg)return `时间范围: ${task.label}\n当前还没有可用最优结果。`;
+      return [
+        `时间范围: ${task.label}`,
+        `最佳评分: ${task.best.score.toFixed(4)}`,
+        `最佳收益率: ${pct(task.best.returnRate)}`,
+        `抽样次数: ${task.attempts}`,
+        `有效结果: ${task.valid}`,
+        "",
+        formatConfigDetails(task.best.cfg)
+      ].join("\n");
+    }
+
+    function renderTaskBoard(status){
+      S.taskStatus=status||null;
+      const jobs=(status&&Array.isArray(status.jobs))?status.jobs:[];
+      const runningJobs=status?Number(status.runningJobs||0):0;
+      const totalJobs=status?Number(status.totalJobs||0):0;
+      const bestTask=jobs.find(j=>j.best)||null;
+
+      bestScore.textContent=bestTask?bestTask.best.score.toFixed(2):"-";
+      bestReturn.textContent=bestTask?pct(bestTask.best.returnRate):"-";
+      bestReturn.className=`v ${bestTask&&bestTask.best.returnRate>=0?"good":"bad"}`;
+      bestInvested.textContent=String(runningJobs);
+      bestValue.textContent=String(totalJobs);
+
+      randomMeta.textContent=status
+        ? `数据年份: ${status.minYear||"-"}-${status.maxYear||"-"} | 运行中任务: ${runningJobs} | 总任务: ${totalJobs}`
+        : "状态：未开始 | 抽样：0 | 有效：0";
+
+      if(!jobs.length){
+        randomRows.innerHTML=`<tr><td colspan="7">尚未创建任务。</td></tr>`;
+        randomDetail.textContent=formatTaskDetails(null);
+        return;
+      }
+
+      if(S.selectedRandomIndex===null || S.selectedRandomIndex>=jobs.length){S.selectedRandomIndex=0;}
+      randomRows.innerHTML=jobs.map((j,i)=>`<tr data-idx="${i}" class="${i===S.selectedRandomIndex?"selected":""}"><td>${i+1}</td><td>${j.label}</td><td>${j.best?j.best.score.toFixed(2):"-"}</td><td>${j.best?pct(j.best.returnRate):"-"}</td><td>${j.attempts}</td><td>${j.valid}</td><td>${j.running?"运行中":"已停止"}</td></tr>`).join("");
+      randomDetail.textContent=formatTaskDetails(jobs[S.selectedRandomIndex]||null);
+    }
+
+    function renderManual(res){
+      S.manualResult=res;
+      manualInvested.textContent=`${money(res.totalInvested)} 元`;
+      manualValue.textContent=`${money(res.finalValue)} 元`;
+      manualReturn.textContent=pct(res.returnRate);
+      manualReturn.className=`v ${res.returnRate>=0?"good":"bad"}`;
+      manualCost.textContent=res.averageCost?num(res.averageCost):"-";
+      manualRows.innerHTML=res.trades.slice(0,200).map(t=>`<tr><td>${t.d}</td><td>${num(t.p)}</td><td>${money(t.a)}</td><td>${num(t.u)}</td><td>${t.t}</td><td>${t.r}</td></tr>`).join("")||`<tr><td colspan="6">没有交易记录。</td></tr>`;
+    }
+
+    const sampleFrom=a=>a[Math.floor(Math.random()*a.length)];
+    function buildRandomConfig(){return{baseAmount:sampleFrom([300,500,800,1000]),dipAmount:sampleFrom([50,80,100,120,150,200]),scheduleMode:sampleFrom(["every_n_days","weekly_weekday"]),scheduleDays:sampleFrom([15,18,20,22,25]),scheduleWeekday:sampleFrom([1,2,3,4,5]),buyMode:sampleFrom(["close_confirm_next_close","intraday_break_same_close"]),maWindow:sampleFrom([12,15,18,20,22,25,28,30]),dynamicEnabled:sampleFrom([true,false]),oversoldMultiplier:sampleFrom([1.4,1.5,1.6,1.8,2.0]),weakMultiplier:sampleFrom([1.1,1.2,1.3,1.4]),neutralMultiplier:1.0,hotMultiplier:sampleFrom([0.5,0.6,0.7,0.8]),oversoldRsi:sampleFrom([30,32,35,38]),weakRsiMax:sampleFrom([42,45,48]),hotRsi:sampleFrom([66,68,70,72]),discountToMa20:sampleFrom([-0.02,-0.03,-0.04,-0.05]),premiumToMa20:sampleFrom([0.04,0.05,0.06,0.08]),drawdownWeak:sampleFrom([0.03,0.04,0.05]),deepDrawdown:sampleFrom([0.06,0.08,0.10,0.12]),sell1Premium:sampleFrom([0.06,0.08,0.10,0.12,0.14]),sell1Rsi:sampleFrom([66,68,70,72,74]),sell1Pct:sampleFrom([0.08,0.10,0.12,0.15,0.18]),sell2Premium:sampleFrom([0.09,0.10,0.12,0.14,0.16]),sell2Pct:sampleFrom([0.10,0.12,0.15,0.18,0.20]),sell2BollBuffer:sampleFrom([0,0.003,0.005,0.008,0.01]),sell3Premium:sampleFrom([0.12,0.14,0.15,0.18,0.20]),sell3Rsi:sampleFrom([72,74,75,78,80]),sell3Pct:sampleFrom([0.12,0.15,0.18,0.20,0.25])};}
+
+    function renderRandom(){
+      const best=S.top[0];
+      randomMeta.textContent=`状态：${S.running?"搜索中":"已停止"} | 抽样：${S.attempts} | 有效：${S.valid}`;
+      if(!best){
+        bestScore.textContent="-";bestReturn.textContent="-";bestInvested.textContent="-";bestValue.textContent="-";
+        randomRows.innerHTML=`<tr><td colspan="11">尚未开始搜索。</td></tr>`;
+        randomDetail.textContent=formatConfigDetails(null);
+        return;
+      }
+      bestScore.textContent=best.score.toFixed(2);
+      bestReturn.textContent=pct(best.res.returnRate);
+      bestReturn.className=`v ${best.res.returnRate>=0?"good":"bad"}`;
+      bestInvested.textContent=`${money(best.res.totalInvested)} 元`;
+      bestValue.textContent=`${money(best.res.finalValue)} 元`;
+      if(S.selectedRandomIndex===null || S.selectedRandomIndex>=S.top.length){S.selectedRandomIndex=0;}
+      randomRows.innerHTML=S.top.map((x,i)=>`<tr data-idx="${i}" class="${i===S.selectedRandomIndex?"selected":""}"><td>${i+1}</td><td>${x.score.toFixed(2)}</td><td>${pct(x.res.returnRate)}</td><td>${money(x.res.totalInvested)}</td><td>${money(x.res.finalValue)}</td><td>${x.cfg.buyMode==="intraday_break_same_close"?"盘中跌破":"收盘确认"}</td><td>${x.cfg.scheduleMode==="weekly_weekday"?["","周一","周二","周三","周四","周五"][x.cfg.scheduleWeekday]:`${x.cfg.scheduleDays}日`}</td><td>${x.cfg.maWindow}</td><td>${money(x.cfg.baseAmount)}</td><td>${money(x.cfg.dipAmount)}</td><td>${x.cfg.oversoldMultiplier}/${x.cfg.weakMultiplier}/${x.cfg.hotMultiplier}</td></tr>`).join("");
+      randomDetail.textContent=formatConfigDetails(S.top[S.selectedRandomIndex]?.cfg||null);
+    }
+
+    function loop(){
+      if(!S.running)return;
+      const batch=+rBatch.value||100,limit=+rTop.value||50,w=+rPenalty.value||0.08;
+      for(let i=0;i<batch;i++){S.attempts++;const cfg=buildRandomConfig(),key=JSON.stringify(cfg);if(S.seen.has(key))continue;S.seen.add(key);try{const res=runBacktest(S.randomBars,cfg);S.valid++;S.top.push({cfg,res,score:score(res,w)});S.top.sort((a,b)=>b.score-a.score);S.top=S.top.slice(0,limit);}catch(e){}}
+      renderRandom();
+      randomStatus.textContent=`搜索中：已抽样 ${S.attempts} 次，得到 ${S.valid} 组有效结果。`;
+      S.timer=setTimeout(loop,0);
+    }
+
+    function defaults(){
+      mBaseAmount.value=500;mDipAmount.value=100;mScheduleMode.value="every_n_days";mScheduleValue.value=20;mBuyMode.value="close_confirm_next_close";mMaWindow.value=20;mDynamic.value="true";
+      mMultipliers.value="1.6,1.2,1.0,0.7";mRsiTriplet.value="35,45,68";mDiscount.value=-3;mPremium.value=5;mDrawdown.value="4,8";
+      mSell1Premium.value=10;mSell1Rsi.value=70;mSell1Pct.value=10;mSell2Premium.value=12;mSell2Pct.value=15;mSell2Buffer.value=0;mSell3Premium.value=15;mSell3Rsi.value=75;mSell3Pct.value=20;
+      manualStatus.textContent="已恢复默认参数。";
+    }
+
+    const bind=(id,handler)=>{const el=document.getElementById(id);if(el)el.onclick=handler;};
+    const onChange=(id,handler)=>{const el=document.getElementById(id);if(el)el.onchange=handler;};
+    bind("goManual",()=>show("manual"));
+    bind("goRandom",()=>show("random"));
+    document.querySelectorAll("[data-back]").forEach(b=>b.onclick=()=>show("home"));
+    randomRows.onclick=(e)=>{const tr=e.target.closest("tr[data-idx]");if(!tr)return;S.selectedRandomIndex=Number(tr.dataset.idx);if(S.taskStatus){renderTaskBoard(S.taskStatus);}else{renderRandom();}};
+
+    onChange("manualFiles", async e=>{try{manualStatus.textContent="正在读取 CSV...";S.manualBars=await readFiles(e.target.files);manualStatus.textContent=`已加载 ${S.manualBars.length} 条历史日线。`;}catch(err){manualStatus.textContent=`读取失败：${err.message}`;}});
+    onChange("randomFiles", async e=>{try{randomStatus.textContent="正在读取 CSV...";S.randomBars=await readFiles(e.target.files);randomStatus.textContent=`已加载 ${S.randomBars.length} 条历史日线。`;}catch(err){randomStatus.textContent=`读取失败：${err.message}`;}});
+
+    bind("runManual", ()=>{try{if(!S.manualBars.length)throw new Error("请先上传 CSV");renderManual(runBacktest(S.manualBars,getManualConfig()));manualStatus.textContent="回测完成。";}catch(err){manualStatus.textContent=`运行失败：${err.message}`;}});
+    bind("loadDefaults", defaults);
+
+    bind("startRandom", ()=>{try{if(!S.randomBars.length)throw new Error("请先上传 CSV");if(S.running)return;S.running=true;S.attempts=0;S.valid=0;S.top=[];S.seen=new Set();renderRandom();randomStatus.textContent="随机搜索已开始。";loop();}catch(err){randomStatus.textContent=`启动失败：${err.message}`;}});
+    bind("startRandomBtn", ()=>{try{if(!S.randomBars.length)throw new Error("请先上传 CSV");if(S.running)return;S.running=true;S.attempts=0;S.valid=0;S.top=[];S.seen=new Set();renderRandom();randomStatus.textContent="随机搜索已开始。";loop();}catch(err){randomStatus.textContent=`启动失败：${err.message}`;}});
+
+    bind("stopRandom", ()=>{S.running=false;if(S.timer)clearTimeout(S.timer);S.timer=null;randomStatus.textContent="已手动停止搜索。";renderRandom();});
+    bind("stopRandomBtn", ()=>{S.running=false;if(S.timer)clearTimeout(S.timer);S.timer=null;randomStatus.textContent="已手动停止搜索。";renderRandom();});
+  </script>
+  <script>
+    (function () {
+      let backendAvailable = false;
+      let pollTimer = null;
+
+      async function callApi(path, method, body) {
+        const res = await fetch(path, {
+          method: method || "GET",
+          headers: { "Content-Type": "application/json" },
+          body: body ? JSON.stringify(body) : undefined
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      }
+
+      async function syncBackendStatus() {
+        try {
+          const data = await callApi("/api/random/tasks");
+          renderTaskBoard(data);
+
+          randomStatus.textContent = `任务总数 ${data.totalJobs}，运行中 ${data.runningJobs}。`;
+        } catch (err) {
+          randomStatus.textContent = `后台状态读取失败: ${err.message}`;
+        }
+      }
+
+      function startPolling() {
+        if (pollTimer) return;
+        pollTimer = setInterval(syncBackendStatus, 1500);
+      }
+
+      async function detectBackend() {
+        try {
+          const data = await callApi("/api/random/tasks");
+          backendAvailable = true;
+          randomStatus.textContent = "检测到后台服务，可按年份区间创建回测任务";
+          if (Number.isInteger(data.minYear)) rStartYear.value = data.minYear;
+          if (Number.isInteger(data.maxYear)) rEndYear.value = data.maxYear;
+          startPolling();
+          await syncBackendStatus();
+        } catch (_) {
+          backendAvailable = false;
+        }
+      }
+
+      const startBtn = document.getElementById("startRandom");
+      const stopBtn = document.getElementById("stopRandom");
+      const originalStart = startBtn ? startBtn.onclick : null;
+      const originalStop = stopBtn ? stopBtn.onclick : null;
+
+      if (startBtn) {
+        startBtn.onclick = async function () {
+          if (!backendAvailable) {
+            if (typeof originalStart === "function") originalStart();
+            return;
+          }
+
+          try {
+            await callApi("/api/random/tasks/start", "POST", {
+              csvPath: "au9999_history.csv",
+              startYear: Number(rStartYear.value),
+              endYear: Number(rEndYear.value),
+              batch: Number(rBatch.value) || 100,
+              top: Number(rTop.value) || 50,
+              penalty: Number(rPenalty.value) || 0.08
+            });
+            randomStatus.textContent = `已创建任务：${rStartYear.value}-${rEndYear.value}`;
+            startPolling();
+            await syncBackendStatus();
+          } catch (err) {
+            randomStatus.textContent = `后台启动失败: ${err.message}`;
+          }
+        };
+      }
+
+      if (stopBtn) {
+        stopBtn.onclick = async function () {
+          if (!backendAvailable) {
+            if (typeof originalStop === "function") originalStop();
+            return;
+          }
+
+          try {
+            await callApi("/api/random/tasks/stop", "POST", {});
+            randomStatus.textContent = "已停止全部任务";
+            await syncBackendStatus();
+          } catch (err) {
+            randomStatus.textContent = `后台停止失败: ${err.message}`;
+          }
+        };
+      }
+
+      detectBackend();
+    })();
+  </script>
+</body>
+</html>
