@@ -61,6 +61,25 @@
     </div>
 
     <div class="panel">
+      <h3 style="margin-top:0">Cloudflare 上传</h3>
+      <div class="row">
+        <label>API: <input id="cfApiUrl" type="text" placeholder="https://your-worker.workers.dev" style="width:320px"></label>
+        <label>频率:
+          <select id="cfInterval" style="width:120px">
+            <option value="10">10 分钟</option>
+            <option value="20">20 分钟</option>
+            <option value="30" selected>30 分钟</option>
+            <option value="60">60 分钟</option>
+          </select>
+        </label>
+        <button class="primary" id="cfUploadBtn">立即上传</button>
+        <button id="cfAutoStartBtn">启动自动上传</button>
+        <button id="cfAutoStopBtn">停止自动上传</button>
+      </div>
+      <div id="cfStatusText" class="meta" style="margin-top:6px">未配置。</div>
+    </div>
+
+    <div class="panel">
       <h3 style="margin-top:0">&#x533A;&#x95F4;&#x8986;&#x76D6;</h3>
       <table>
         <thead><tr><th>&#x5E74;&#x4EFD;&#x533A;&#x95F4;</th><th>&#x8BB0;&#x5F55;&#x6570;</th><th>&#x6700;&#x4F73;&#x8BC4;&#x5206;</th></tr></thead>
@@ -70,10 +89,12 @@
   </div>
 
   <script>
-    let adminToken = localStorage.getItem("ausub_admin_token") || "";
+    let adminToken = localStorage.getItem("ausub_local_admin_token") || localStorage.getItem("ausub_admin_token") || "";
+    const savedCfApiUrl = localStorage.getItem("ausub_cf_api_url") || "";
+    if (savedCfApiUrl) cfApiUrl.value = savedCfApiUrl;
     if (!adminToken) {
-      adminToken = prompt("请输入管理员 Token：") || "";
-      if (adminToken) localStorage.setItem("ausub_admin_token", adminToken);
+      adminToken = prompt("请输入本地管理员 Token：") || "";
+      if (adminToken) localStorage.setItem("ausub_local_admin_token", adminToken);
     }
 
     async function api(path, method = "GET", body) {
@@ -83,9 +104,10 @@
         body: body ? JSON.stringify(body) : undefined
       });
       if (r.status === 401) {
+        localStorage.removeItem("ausub_local_admin_token");
         localStorage.removeItem("ausub_admin_token");
-        adminToken = prompt("Token 无效，请重新输入：") || "";
-        if (adminToken) localStorage.setItem("ausub_admin_token", adminToken);
+        adminToken = prompt("本地管理员 Token 无效，请重新输入：") || "";
+        if (adminToken) localStorage.setItem("ausub_local_admin_token", adminToken);
         throw new Error("认证失败，请刷新重试");
       }
       if (!r.ok) {
@@ -103,10 +125,18 @@
           api("/api/leaderboard?range=all&limit=1"),
           api("/api/admin/robust/status")
         ]);
-        statusText.textContent = `\u8fd0\u884c\u72b6\u6001: ${status.running ? "\u8fd0\u884c\u4e2d" : "\u5df2\u505c\u6b62"} | \u5c1d\u8bd5: ${status.attempts} | \u6709\u6548: ${status.valid} | \u6570\u636e\u5e74\u4efd: ${status.minYear || "-"}-${status.maxYear || "-"} | \u533a\u95f4\u6570: ${status.totalRanges} | \u5b58\u50a8\u6587\u4ef6: ${status.storePath}`;
+        statusText.textContent = `\u8fd0\u884c\u72b6\u6001: ${status.running ? "\u8fd0\u884c\u4e2d" : "\u5df2\u505c\u6b62"} | \u5c1d\u8bd5: ${status.attempts} | \u6709\u6548: ${status.valid} | Worker: ${status.activeWorkers || 0}/${status.workerCount || 0} | \u6570\u636e\u5e74\u4efd: ${status.minYear || "-"}-${status.maxYear || "-"} | \u533a\u95f4\u6570: ${status.totalRanges} | \u5b58\u50a8\u6587\u4ef6: ${status.storePath}`;
         const tc = robustStatus.topCounts || {};
         const tcStr = Object.entries(tc).map(([y,c]) => `${y}y:${c}`).join(" ");
-        robustStatusText.textContent = `\u8fd0\u884c\u72b6\u6001: ${robustStatus.running ? "\u8fd0\u884c\u4e2d" : "\u5df2\u505c\u6b62"} | \u5c1d\u8bd5: ${robustStatus.attempts} | \u6709\u6548: ${robustStatus.valid} | \u7a97\u53e3\u6570: ${robustStatus.windowCount} | \u5404\u5468\u671f: ${tcStr || "-"}`;
+        robustStatusText.textContent = `\u8fd0\u884c\u72b6\u6001: ${robustStatus.running ? "\u8fd0\u884c\u4e2d" : "\u5df2\u505c\u6b62"} | \u5c1d\u8bd5: ${robustStatus.attempts} | \u6709\u6548: ${robustStatus.valid} | Worker: ${robustStatus.activeWorkers || 0}/${robustStatus.workerCount || 0} | \u7a97\u53e3\u6570: ${robustStatus.windowCount} | \u5404\u5468\u671f: ${tcStr || "-"}`;
+        const sync = status.cloudSync || robustStatus.cloudSync || {};
+        if (sync.apiUrl && !cfApiUrl.value) cfApiUrl.value = sync.apiUrl;
+        if (sync.intervalMinutes) cfInterval.value = String(sync.intervalMinutes);
+        const last = sync.lastRunAt ? ` | 上次: ${sync.lastRunAt}` : "";
+        const lastResult = sync.lastResult && sync.lastResult.error
+          ? ` | 最近错误: ${sync.lastResult.error}`
+          : (sync.lastResult ? ` | 最近上传: range ${sync.lastResult.rangeSubmitted || 0}, robust ${sync.lastResult.robustSubmitted || 0}` : "");
+        cfStatusText.textContent = `状态: ${sync.enabled ? "自动上传中" : "未启动"}${sync.running ? " (本轮执行中)" : ""} | 本地结果: range ${sync.rangeEntries || 0}, robust ${sync.robustEntries || 0}${last}${lastResult}`;
         const ranges = Array.isArray(board.ranges) ? board.ranges : [];
         rangeRows.innerHTML = ranges.length
           ? ranges.map((r) => `<tr><td>${r.key}</td><td>${r.count}</td><td>${r.bestScore === null ? "-" : r.bestScore.toFixed(2)}</td></tr>`).join("")
@@ -177,6 +207,47 @@
         refresh();
       } catch (err) {
         robustStatusText.textContent = `\u505c\u6b62\u5931\u8d25: ${err.message}`;
+      }
+    };
+
+    function getCfSettings() {
+      const apiUrl = String(cfApiUrl.value || "").trim().replace(/\/$/, "");
+      const intervalMinutes = Number(cfInterval.value || 30);
+      if (!apiUrl) throw new Error("请先填写 Cloudflare Worker API");
+      localStorage.setItem("ausub_cf_api_url", apiUrl);
+      return { apiUrl, intervalMinutes };
+    }
+
+    cfUploadBtn.onclick = async () => {
+      try {
+        const settings = getCfSettings();
+        const out = await api("/api/admin/cloudflare/upload", "POST", settings);
+        const r = out.result || {};
+        cfStatusText.textContent = `上传完成: range ${r.rangeSubmitted || 0}, robust ${r.robustSubmitted || 0}`;
+        refresh();
+      } catch (err) {
+        cfStatusText.textContent = `上传失败: ${err.message}`;
+      }
+    };
+
+    cfAutoStartBtn.onclick = async () => {
+      try {
+        const settings = getCfSettings();
+        await api("/api/admin/cloudflare/auto-start", "POST", settings);
+        cfStatusText.textContent = `自动上传已启动，每 ${settings.intervalMinutes} 分钟一次。`;
+        refresh();
+      } catch (err) {
+        cfStatusText.textContent = `启动失败: ${err.message}`;
+      }
+    };
+
+    cfAutoStopBtn.onclick = async () => {
+      try {
+        await api("/api/admin/cloudflare/auto-stop", "POST", {});
+        cfStatusText.textContent = "自动上传已停止。";
+        refresh();
+      } catch (err) {
+        cfStatusText.textContent = `停止失败: ${err.message}`;
       }
     };
 

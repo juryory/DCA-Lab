@@ -1,4 +1,5 @@
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { Worker } = require("worker_threads");
 const { barsFromCsvText, ASSET_KEYS } = require("./engine");
@@ -13,6 +14,34 @@ function yearFromTradeDate(yyyymmdd) {
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function envInt(name) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw === "") return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function cpuCount() {
+  try {
+    if (typeof os.availableParallelism === "function") return os.availableParallelism();
+  } catch (_) {}
+  const cpus = os.cpus();
+  return Array.isArray(cpus) && cpus.length ? cpus.length : 1;
+}
+
+function tieredDefaultWorkerCount(limit = 2) {
+  const cpus = cpuCount();
+  let suggested = 1;
+  if (cpus >= 16) suggested = 4;
+  else if (cpus >= 8) suggested = 2;
+  else suggested = 1;
+  return Math.min(limit, suggested);
+}
+
+function configuredWorkerCount(envName, fallbackLimit = 2) {
+  return envInt(envName) || tieredDefaultWorkerCount(fallbackLimit);
 }
 
 function barsToCsvText(bars) {
@@ -30,7 +59,8 @@ function barsToCsvText(bars) {
 class RandomRunner {
   constructor() {
     this.running = false;
-    this.worker = null;
+    this.workers = new Map();
+    this.workerSeq = 0;
     this.lastError = null;
     this.attempts = 0;
     this.valid = 0;
@@ -38,6 +68,7 @@ class RandomRunner {
     this.batch = 100;
     this.penalty = 0.08;
     this.topLimit = 10;
+    this.workerCount = configuredWorkerCount("RANGE_WORKERS", 4);
 
     this.dataDir = path.resolve(process.cwd(), "data");
     this.csvPath = path.resolve(this.dataDir, "au9999_history.csv");
@@ -229,24 +260,34 @@ class RandomRunner {
     if (!this.bars.length) throw new Error("No data available, please upload CSV first");
     this.running = true;
     this.lastError = null;
-    this._startWorker();
-    console.log(`[Runner] started (worker thread), batch=${this.batch}`);
+    this.workerCount = Number(opts.workerCount) > 0 ? Number(opts.workerCount) : this.workerCount;
+    this._startWorkers();
+    console.log(`[Runner] started (${this.workerCount} worker${this.workerCount > 1 ? "s" : ""}), batch=${this.batch}`);
   }
 
   stop() {
     this.running = false;
-    if (this.worker) {
-      this.worker.postMessage({ cmd: "stop" });
-      this.worker.terminate();
-      this.worker = null;
-    }
+    this._stopWorkers();
     this._saveStore(true);
     console.log(`[Runner] stopped, attempts=${this.attempts}, valid=${this.valid}`);
   }
 
+  _stopWorkers() {
+    for (const { worker } of this.workers.values()) {
+      worker.postMessage({ cmd: "stop" });
+      worker.terminate();
+    }
+    this.workers.clear();
+  }
+
+  _startWorkers() {
+    this._stopWorkers();
+    for (let i = 0; i < this.workerCount; i++) this._startWorker();
+  }
+
   _startWorker() {
-    if (this.worker) { this.worker.terminate(); this.worker = null; }
-    this.worker = new Worker(path.resolve(__dirname, "worker_range.js"), {
+    const workerId = ++this.workerSeq;
+    const worker = new Worker(path.resolve(__dirname, "worker_range.js"), {
       workerData: {
         csvText: this.csvText,
         assetCsvTexts: this.assetCsvTexts,
@@ -254,10 +295,11 @@ class RandomRunner {
         penalty: this.penalty,
       },
     });
+    this.workers.set(workerId, { worker });
 
-    this.worker.on("message", (msg) => {
+    worker.on("message", (msg) => {
       if (msg.ready) {
-        this.worker.postMessage({ cmd: "start", batch: this.batch, penalty: this.penalty });
+        worker.postMessage({ cmd: "start", batch: this.batch, penalty: this.penalty });
         return;
       }
       if (msg.results) {
@@ -274,14 +316,15 @@ class RandomRunner {
       }
     });
 
-    this.worker.on("error", (err) => {
+    worker.on("error", (err) => {
       this.lastError = err.message;
       console.error(`[Runner] worker error: ${err.message}`);
     });
 
-    this.worker.on("exit", (code) => {
+    worker.on("exit", (code) => {
+      this.workers.delete(workerId);
       if (this.running) {
-        console.warn(`[Runner] worker exited (code ${code}), restarting...`);
+        console.warn(`[Runner] worker ${workerId} exited (code ${code}), restarting...`);
         setTimeout(() => { if (this.running) this._startWorker(); }, 1000);
       }
     });
@@ -343,6 +386,7 @@ class RandomRunner {
       running: this.running, attempts: this.attempts, valid: this.valid, skipped: this.skipped,
       csvPath: this.csvPath, minYear: this.minYear, maxYear: this.maxYear,
       batch: this.batch, penalty: this.penalty, topLimit: this.topLimit,
+      workerCount: this.workerCount, activeWorkers: this.workers.size,
       totalRanges: Object.keys(this.store.ranges).length,
       totalAllRows: this.store.all.length,
       lastError: this.lastError, storePath: this.storePath,
@@ -357,7 +401,8 @@ class RandomRunner {
 class RobustSearchRunner {
   constructor(runner) {
     this.runner = runner;
-    this.worker = null;
+    this.workers = new Map();
+    this.workerSeq = 0;
     this.running = false;
     this.attempts = 0;
     this.valid = 0;
@@ -366,6 +411,7 @@ class RobustSearchRunner {
     this.penalty = 0.08;
     this.topLimit = 10;
     this.windowCount = 10;
+    this.workerCount = configuredWorkerCount("ROBUST_WORKERS", 4);
 
     this.storePath = path.resolve(runner.dataDir, "robust_store.json");
     this.topByYear = {};
@@ -417,25 +463,35 @@ class RobustSearchRunner {
     this.penalty = Number.isFinite(Number(opts.penalty)) ? Number(opts.penalty) : this.penalty;
     this.topLimit = Number(opts.topLimit) > 0 ? Number(opts.topLimit) : this.topLimit;
     this.windowCount = Number(opts.windowCount) > 0 ? Number(opts.windowCount) : this.windowCount;
+    this.workerCount = Number(opts.workerCount) > 0 ? Number(opts.workerCount) : this.workerCount;
     this.running = true;
-    this._startWorker();
-    console.log(`[Robust] started (worker thread), years=2-8, count=${this.windowCount}, batch=${this.batch}`);
+    this._startWorkers();
+    console.log(`[Robust] started (${this.workerCount} worker${this.workerCount > 1 ? "s" : ""}), years=2-8, count=${this.windowCount}, batch=${this.batch}`);
   }
 
   stop() {
     this.running = false;
-    if (this.worker) {
-      this.worker.postMessage({ cmd: "stop" });
-      this.worker.terminate();
-      this.worker = null;
-    }
+    this._stopWorkers();
     this._saveStore(true);
     console.log(`[Robust] stopped, attempts=${this.attempts}, valid=${this.valid}`);
   }
 
+  _stopWorkers() {
+    for (const { worker } of this.workers.values()) {
+      worker.postMessage({ cmd: "stop" });
+      worker.terminate();
+    }
+    this.workers.clear();
+  }
+
+  _startWorkers() {
+    this._stopWorkers();
+    for (let i = 0; i < this.workerCount; i++) this._startWorker();
+  }
+
   _startWorker() {
-    if (this.worker) { this.worker.terminate(); this.worker = null; }
-    this.worker = new Worker(path.resolve(__dirname, "worker_robust.js"), {
+    const workerId = ++this.workerSeq;
+    const worker = new Worker(path.resolve(__dirname, "worker_robust.js"), {
       workerData: {
         csvText: this.runner.csvText,
         assetCsvTexts: this.runner.assetCsvTexts,
@@ -444,10 +500,11 @@ class RobustSearchRunner {
         windowCount: this.windowCount,
       },
     });
+    this.workers.set(workerId, { worker });
 
-    this.worker.on("message", (msg) => {
+    worker.on("message", (msg) => {
       if (msg.ready) {
-        this.worker.postMessage({ cmd: "start", batch: this.batch, penalty: this.penalty, windowCount: this.windowCount });
+        worker.postMessage({ cmd: "start", batch: this.batch, penalty: this.penalty, windowCount: this.windowCount });
         return;
       }
       if (msg.results) {
@@ -468,13 +525,14 @@ class RobustSearchRunner {
       }
     });
 
-    this.worker.on("error", (err) => {
+    worker.on("error", (err) => {
       console.error(`[Robust] worker error: ${err.message}`);
     });
 
-    this.worker.on("exit", (code) => {
+    worker.on("exit", (code) => {
+      this.workers.delete(workerId);
       if (this.running) {
-        console.warn(`[Robust] worker exited (code ${code}), restarting...`);
+        console.warn(`[Robust] worker ${workerId} exited (code ${code}), restarting...`);
         setTimeout(() => { if (this.running) this._startWorker(); }, 1000);
       }
     });
@@ -517,6 +575,7 @@ class RobustSearchRunner {
     return {
       running: this.running, attempts: this.attempts, valid: this.valid, skipped: this.skipped,
       batch: this.batch, penalty: this.penalty, windowCount: this.windowCount,
+      workerCount: this.workerCount, activeWorkers: this.workers.size,
       topCounts, updatedAt: nowBeijing(),
     };
   }

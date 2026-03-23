@@ -292,7 +292,7 @@
       bestValue.textContent=String(totalJobs);
 
       randomMeta.textContent=status
-        ? `数据年份: ${status.minYear||"-"}-${status.maxYear||"-"} | 运行中任务: ${runningJobs} | 总任务: ${totalJobs}`
+        ? `数据年份: ${status.minYear||"-"}-${status.maxYear||"-"} | Worker: ${status.activeWorkers||0}/${status.workerLimit||0} | 运行中任务: ${runningJobs} | 排队任务: ${status.queuedJobs||0} | 总任务: ${totalJobs}`
         : "状态：未开始 | 抽样：0 | 有效：0";
 
       if(!jobs.length){
@@ -302,7 +302,7 @@
       }
 
       if(S.selectedRandomIndex===null || S.selectedRandomIndex>=jobs.length){S.selectedRandomIndex=0;}
-      randomRows.innerHTML=jobs.map((j,i)=>`<tr data-idx="${i}" class="${i===S.selectedRandomIndex?"selected":""}"><td>${i+1}</td><td>${j.label}</td><td>${j.best?j.best.score.toFixed(2):"-"}</td><td>${j.best?pct(j.best.returnRate):"-"}</td><td>${j.attempts}</td><td>${j.valid}</td><td>${j.running?"运行中":"已停止"}</td></tr>`).join("");
+      randomRows.innerHTML=jobs.map((j,i)=>`<tr data-idx="${i}" class="${i===S.selectedRandomIndex?"selected":""}"><td>${i+1}</td><td>${j.label}</td><td>${j.best?j.best.score.toFixed(2):"-"}</td><td>${j.best?pct(j.best.returnRate):"-"}</td><td>${j.attempts}</td><td>${j.valid}</td><td>${j.running?"运行中":(j.queued?"排队中":"已停止")}</td></tr>`).join("");
       randomDetail.textContent=formatTaskDetails(jobs[S.selectedRandomIndex]||null);
     }
 
@@ -377,13 +377,35 @@
     (function () {
       let backendAvailable = false;
       let pollTimer = null;
+      let adminToken = localStorage.getItem("ausub_local_admin_token") || localStorage.getItem("ausub_admin_token") || "";
+
+      function ensureAdminToken(forcePrompt) {
+        if (!forcePrompt && adminToken) return adminToken;
+        const next = prompt("请输入本地管理员 Token") || "";
+        adminToken = next.trim();
+        if (adminToken) localStorage.setItem("ausub_local_admin_token", adminToken);
+        else {
+          localStorage.removeItem("ausub_local_admin_token");
+          localStorage.removeItem("ausub_admin_token");
+        }
+        return adminToken;
+      }
 
       async function callApi(path, method, body) {
         const res = await fetch(path, {
           method: method || "GET",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(adminToken ? { "Authorization": `Bearer ${adminToken}` } : {}),
+          },
           body: body ? JSON.stringify(body) : undefined
         });
+        if (res.status === 401) {
+          adminToken = "";
+          localStorage.removeItem("ausub_local_admin_token");
+          localStorage.removeItem("ausub_admin_token");
+          throw new Error("需要本地管理员 token");
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       }
@@ -393,7 +415,7 @@
           const data = await callApi("/api/random/tasks");
           renderTaskBoard(data);
 
-          randomStatus.textContent = `任务总数 ${data.totalJobs}，运行中 ${data.runningJobs}。`;
+          randomStatus.textContent = `任务总数 ${data.totalJobs}，运行中 ${data.runningJobs}，排队 ${data.queuedJobs || 0}。`;
         } catch (err) {
           randomStatus.textContent = `后台状态读取失败: ${err.message}`;
         }
@@ -431,6 +453,10 @@
           }
 
           try {
+            if (!ensureAdminToken(false)) {
+              randomStatus.textContent = "未提供本地管理员 token，无法创建后台任务。";
+              return;
+            }
             await callApi("/api/random/tasks/start", "POST", {
               csvPath: "au9999_history.csv",
               startYear: Number(rStartYear.value),
@@ -443,6 +469,9 @@
             startPolling();
             await syncBackendStatus();
           } catch (err) {
+            if (String(err.message).includes("本地管理员 token")) {
+              ensureAdminToken(true);
+            }
             randomStatus.textContent = `后台启动失败: ${err.message}`;
           }
         };
@@ -456,10 +485,17 @@
           }
 
           try {
+            if (!ensureAdminToken(false)) {
+              randomStatus.textContent = "未提供本地管理员 token，无法停止后台任务。";
+              return;
+            }
             await callApi("/api/random/tasks/stop", "POST", {});
             randomStatus.textContent = "已停止全部任务";
             await syncBackendStatus();
           } catch (err) {
+            if (String(err.message).includes("本地管理员 token")) {
+              ensureAdminToken(true);
+            }
             randomStatus.textContent = `后台停止失败: ${err.message}`;
           }
         };

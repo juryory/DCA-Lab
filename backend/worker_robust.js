@@ -117,7 +117,8 @@ function evaluateRobust(portfolioCfg, windows) {
   return {
     robustScore, avgScore: Number(avg.toFixed(4)), minScore: Number(min.toFixed(4)),
     maxScore: Number(Math.max(...scores).toFixed(4)), stdDev: Number(stdDev.toFixed(4)),
-    windowCount: scores.length, details,
+    windowCount: scores.length, windows: windows.map(([sy, ey]) => `${sy}-${ey}`), details,
+    penaltyWeight: penalty,
     weights: portfolioCfg.weights, configs: portfolioCfg.configs,
   };
 }

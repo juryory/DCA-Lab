@@ -126,6 +126,7 @@ function loop() {
         score: s, returnRate: res.returnRate,
         totalInvested: res.totalInvested, finalValue: res.finalValue,
         tradeCount: res.tradeCount,
+        penaltyWeight: penalty,
         weights: res.weights, assetDetails: res.assetDetails,
         configs: res.configs,
       });
@@ -143,6 +144,7 @@ function loop() {
             score: s2, returnRate: res2.returnRate,
             totalInvested: res2.totalInvested, finalValue: res2.finalValue,
             tradeCount: res2.tradeCount,
+            penaltyWeight: penalty,
             weights: res2.weights, assetDetails: res2.assetDetails,
             configs: res2.configs,
           });

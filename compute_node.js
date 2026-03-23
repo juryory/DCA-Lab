@@ -15,10 +15,32 @@
  */
 
 const { Worker } = require("worker_threads");
+const { execFile } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const http = require("http");
 const https = require("https");
+
+function loadDotEnv() {
+  const envPath = path.resolve(process.cwd(), ".env");
+  if (!fs.existsSync(envPath)) return;
+  const text = fs.readFileSync(envPath, "utf8");
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const idx = line.indexOf("=");
+    if (idx < 0) continue;
+    const key = line.slice(0, idx).trim();
+    if (!key || process.env[key] !== undefined) continue;
+    let value = line.slice(idx + 1).trim();
+    if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+}
+
+loadDotEnv();
 
 // --- Parse CLI args ---
 const args = process.argv.slice(2);
@@ -27,13 +49,13 @@ function getArg(name, defaultVal) {
   return idx >= 0 && args[idx + 1] ? args[idx + 1] : defaultVal;
 }
 
-const API_URL = getArg("api", "https://ausub-api.juryory.workers.dev").replace(/\/$/, "");
-const SUBMIT_INTERVAL = Number(getArg("interval", "30")) * 1000;
-const BATCH = Number(getArg("batch", "50"));
-const PENALTY = Number(getArg("penalty", "0.08"));
+const API_URL = getArg("api", process.env.CLOUDFLARE_API_URL || "https://dcalab.juryory.workers.dev").replace(/\/$/, "");
+const SUBMIT_INTERVAL = Number(getArg("interval", process.env.COMPUTE_SUBMIT_INTERVAL_SECONDS || "30")) * 1000;
+const BATCH = Number(getArg("batch", process.env.COMPUTE_BATCH || "50"));
+const PENALTY = Number(getArg("penalty", process.env.COMPUTE_PENALTY || "0.08"));
 
 if (!API_URL) {
-  console.error("请指定 Worker API 地址: node compute_node.js --api https://ausub-api.juryory.workers.dev");
+  console.error("请指定 Worker API 地址: node compute_node.js --api https://dcalab.juryory.workers.dev");
   process.exit(1);
 }
 
@@ -63,6 +85,44 @@ const RANGE_BUFFER_MAX = 50;
 const ROBUST_BUFFER_MAX = 50;
 
 // --- HTTP POST helper ---
+function isRetryableNetworkError(err) {
+  if (!err) return false;
+  if (err.code === "ETIMEDOUT" || err.code === "ECONNRESET" || err.code === "ECONNREFUSED") return true;
+  if (Array.isArray(err.errors) && err.errors.some(isRetryableNetworkError)) return true;
+  return /timeout|proxy|connect/i.test(String(err.message || ""));
+}
+
+function postJsonViaPowerShell(url, data) {
+  return new Promise((resolve, reject) => {
+    const env = {
+      ...process.env,
+      REQ_URL: url,
+      REQ_BODY: JSON.stringify(data),
+    };
+    const script = [
+      "$ProgressPreference='SilentlyContinue'",
+      "$resp = Invoke-RestMethod -Uri $env:REQ_URL -Method Post -ContentType 'application/json' -Body $env:REQ_BODY",
+      "$resp | ConvertTo-Json -Depth 100 -Compress",
+    ].join("; ");
+    execFile("powershell.exe", ["-NoProfile", "-Command", script], { env, windowsHide: true }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error((stderr || error.message || "").trim() || "PowerShell request failed"));
+        return;
+      }
+      const text = String(stdout || "").trim();
+      if (!text) {
+        resolve(null);
+        return;
+      }
+      try {
+        resolve(JSON.parse(text));
+      } catch {
+        resolve({ raw: text });
+      }
+    });
+  });
+}
+
 function postJson(url, data) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
@@ -88,6 +148,10 @@ function postJson(url, data) {
     req.on("error", reject);
     req.write(body);
     req.end();
+  }).catch((err) => {
+    if (process.platform !== "win32" || !isRetryableNetworkError(err)) throw err;
+    console.warn(`[Node] native HTTP failed, retrying via PowerShell: ${err.code || err.message}`);
+    return postJsonViaPowerShell(url, data);
   });
 }
 

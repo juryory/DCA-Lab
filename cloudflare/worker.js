@@ -69,6 +69,7 @@ function validateRangeEntry(entry) {
   if (typeof entry.totalInvested !== "number" || entry.totalInvested <= 0) return "bad totalInvested";
   if (typeof entry.tradeCount !== "number" || entry.tradeCount < 0) return "bad tradeCount";
   if (!entry.rangeKey || typeof entry.rangeKey !== "string") return "missing rangeKey";
+  if (entry.penaltyWeight !== undefined && (typeof entry.penaltyWeight !== "number" || entry.penaltyWeight < 0)) return "bad penaltyWeight";
   if (!validateWeights(entry.weights)) return "invalid weights";
   if (!validateConfigs(entry.configs)) return "invalid configs";
   return null;
@@ -79,6 +80,8 @@ function validateRobustEntry(entry) {
   if (typeof entry.robustScore !== "number") return "missing robustScore";
   if (typeof entry.avgScore !== "number") return "missing avgScore";
   if (typeof entry.windowYears !== "number" || entry.windowYears < 2 || entry.windowYears > 8) return "bad windowYears";
+  if (!Array.isArray(entry.windows) || entry.windows.length < 2) return "missing windows";
+  if (entry.penaltyWeight !== undefined && (typeof entry.penaltyWeight !== "number" || entry.penaltyWeight < 0)) return "bad penaltyWeight";
   if (!validateWeights(entry.weights)) return "invalid weights";
   if (!validateConfigs(entry.configs)) return "invalid configs";
   return null;
@@ -112,6 +115,19 @@ async function getJson(env, key) {
 
 async function putJson(env, key, data) {
   await env.STORE.put(key, JSON.stringify(data));
+}
+
+async function snapshotRangeStore(env) {
+  const rangeKeys = await getJson(env, "meta:range_keys") || [];
+  const ranges = {};
+  for (const rk of rangeKeys) {
+    ranges[rk] = await getJson(env, `range:${rk}`) || [];
+  }
+  return {
+    metaRangeKeys: rangeKeys,
+    global: await getJson(env, "range:__global__") || [],
+    ranges,
+  };
 }
 
 // --- Merge logic ---
@@ -267,10 +283,7 @@ async function handleVerify(request, env) {
   // Backup current data before merge (防止污染数据挤掉好数据后无法恢复)
   const backupTs = Date.now();
   if (pendingKey.startsWith("pending:range:")) {
-    const globalSnap = await getJson(env, "range:__global__") || [];
-    if (globalSnap.length > 0) {
-      await putJson(env, `backup:range:${backupTs}`, { ts: backupTs, global: globalSnap });
-    }
+    await putJson(env, `backup:range:${backupTs}`, { ts: backupTs, ...(await snapshotRangeStore(env)) });
   } else if (pendingKey.startsWith("pending:robust:")) {
     const robustSnap = {};
     for (let y = 2; y <= 8; y++) {
@@ -336,13 +349,22 @@ async function handleRollback(request, env) {
   if (!backup) return jsonResp({ error: "backup not found" }, 404);
 
   if (backupKey.startsWith("backup:range:")) {
-    if (backup.global) {
-      await putJson(env, "range:__global__", backup.global);
+    const existing = await env.STORE.list({ prefix: "range:" });
+    for (const key of existing.keys || []) {
+      await env.STORE.delete(key.name);
     }
-    return jsonResp({ ok: true, restored: "range", entries: (backup.global || []).length });
+    await putJson(env, "range:__global__", Array.isArray(backup.global) ? backup.global : []);
+    await putJson(env, "meta:range_keys", Array.isArray(backup.metaRangeKeys) ? backup.metaRangeKeys : []);
+    for (const [rk, entries] of Object.entries(backup.ranges || {})) {
+      await putJson(env, `range:${rk}`, Array.isArray(entries) ? entries : []);
+    }
+    return jsonResp({ ok: true, restored: "range", entries: (backup.global || []).length, ranges: Object.keys(backup.ranges || {}).length });
   }
 
   if (backupKey.startsWith("backup:robust:")) {
+    for (let y = 2; y <= 8; y++) {
+      await env.STORE.delete(`robust:${y}`);
+    }
     for (const [yr, entries] of Object.entries(backup.data || {})) {
       await putJson(env, `robust:${yr}`, entries);
     }
