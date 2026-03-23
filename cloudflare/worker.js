@@ -1,5 +1,5 @@
 /**
- * AUSUB Cloudflare Worker
+ * DCALab Cloudflare Worker
  * - POST /api/submit/range   提交区间最优解结果（pending）
  * - POST /api/submit/robust  提交平均最优解结果（pending）
  * - POST /api/verify         验证脚本确认结果（需 admin token）
@@ -19,6 +19,10 @@ const TOP_LIMIT = 10;
 const RATE_LIMIT_WINDOW = 60000; // 1 min
 const RATE_LIMIT_MAX = 10;
 const rateLimitMap = new Map();
+
+function envFlag(value) {
+  return value === true || value === "1" || value === "true" || value === "yes" || value === "on";
+}
 
 function jsonResp(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -101,7 +105,7 @@ function checkRateLimit(ip) {
 
 // --- Auth ---
 function checkAdmin(request, env) {
-  const token = env.ADMIN_TOKEN || "ausub_admin";
+  const token = env.ADMIN_TOKEN || "dcalab_admin";
   const auth = request.headers.get("Authorization") || "";
   return auth === `Bearer ${token}`;
 }
@@ -130,6 +134,14 @@ async function snapshotRangeStore(env) {
   };
 }
 
+async function snapshotRobustStore(env) {
+  const robustSnap = {};
+  for (let y = 2; y <= 8; y++) {
+    robustSnap[y] = await getJson(env, `robust:${y}`) || [];
+  }
+  return robustSnap;
+}
+
 // --- Merge logic ---
 function mergeTopRange(existing, newEntries) {
   const list = [...(existing || [])];
@@ -152,6 +164,69 @@ function mergeTopRobust(existing, newEntries) {
   return list;
 }
 
+async function mergeApprovedRangeEntries(env, entries) {
+  const byRange = {};
+  for (const e of entries) {
+    if (!byRange[e.rangeKey]) byRange[e.rangeKey] = [];
+    byRange[e.rangeKey].push(e);
+  }
+
+  const rangeKeys = new Set(await getJson(env, "meta:range_keys") || []);
+  for (const [rk, rangeEntries] of Object.entries(byRange)) {
+    const existing = await getJson(env, `range:${rk}`) || [];
+    const merged = mergeTopRange(existing, rangeEntries);
+    await putJson(env, `range:${rk}`, merged);
+    rangeKeys.add(rk);
+  }
+  await putJson(env, "meta:range_keys", [...rangeKeys]);
+
+  const globalExisting = await getJson(env, "range:__global__") || [];
+  const globalMerged = mergeTopRange(globalExisting, entries);
+  await putJson(env, "range:__global__", globalMerged);
+}
+
+async function mergeApprovedRobustEntries(env, entries) {
+  const byYear = {};
+  for (const e of entries) {
+    const yr = e.windowYears;
+    if (!byYear[yr]) byYear[yr] = [];
+    byYear[yr].push(e);
+  }
+  for (const [yr, yearEntries] of Object.entries(byYear)) {
+    const existing = await getJson(env, `robust:${yr}`) || [];
+    const merged = mergeTopRobust(existing, yearEntries);
+    await putJson(env, `robust:${yr}`, merged);
+  }
+}
+
+async function createBackupForPendingType(env, pendingKey) {
+  const backupTs = Date.now();
+  if (pendingKey.startsWith("pending:range:")) {
+    await putJson(env, `backup:range:${backupTs}`, { ts: backupTs, ...(await snapshotRangeStore(env)) });
+  } else if (pendingKey.startsWith("pending:robust:")) {
+    await putJson(env, `backup:robust:${backupTs}`, { ts: backupTs, data: await snapshotRobustStore(env) });
+  }
+}
+
+async function approvePendingData(env, pendingKey, pendingData, options = {}) {
+  const { backup = true, deletePending = true } = options;
+  if (backup) {
+    await createBackupForPendingType(env, pendingKey);
+  }
+
+  if (pendingKey.startsWith("pending:range:")) {
+    await mergeApprovedRangeEntries(env, pendingData.entries);
+  } else if (pendingKey.startsWith("pending:robust:")) {
+    await mergeApprovedRobustEntries(env, pendingData.entries);
+  } else {
+    throw new Error("unknown pending type");
+  }
+
+  if (deletePending) {
+    await env.STORE.delete(pendingKey);
+  }
+}
+
 // --- Handlers ---
 async function handleSubmitRange(request, env) {
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -170,6 +245,11 @@ async function handleSubmitRange(request, env) {
     valid.push(e);
   }
   if (!valid.length) return jsonResp({ error: "no valid entries" }, 400);
+
+  if (envFlag(env.DIRECT_SUBMIT)) {
+    await mergeApprovedRangeEntries(env, valid);
+    return jsonResp({ ok: true, accepted: valid.length, pending: false, direct: true });
+  }
 
   // Store as pending
   const pendingKey = `pending:range:${Date.now()}:${ip.replace(/[:.]/g, "_")}`;
@@ -195,6 +275,11 @@ async function handleSubmitRobust(request, env) {
     valid.push(e);
   }
   if (!valid.length) return jsonResp({ error: "no valid entries" }, 400);
+
+  if (envFlag(env.DIRECT_SUBMIT)) {
+    await mergeApprovedRobustEntries(env, valid);
+    return jsonResp({ ok: true, accepted: valid.length, pending: false, direct: true });
+  }
 
   const pendingKey = `pending:robust:${Date.now()}:${ip.replace(/[:.]/g, "_")}`;
   await putJson(env, pendingKey, { submittedAt: new Date().toISOString(), ip, entries: valid });
@@ -335,6 +420,64 @@ async function handleVerify(request, env) {
   return jsonResp({ ok: true, action: "approved", entriesCount: pendingData.entries.length });
 }
 
+async function handleVerifyV2(request, env) {
+  if (!checkAdmin(request, env)) return jsonResp({ error: "unauthorized" }, 401);
+
+  let body;
+  try { body = await request.json(); } catch { return jsonResp({ error: "invalid JSON" }, 400); }
+
+  const { pendingKey, action } = body;
+  if (!pendingKey) return jsonResp({ error: "missing pendingKey" }, 400);
+
+  if (action === "reject") {
+    await env.STORE.delete(pendingKey);
+    return jsonResp({ ok: true, action: "rejected" });
+  }
+
+  const pendingData = await getJson(env, pendingKey);
+  if (!pendingData || !Array.isArray(pendingData.entries)) {
+    return jsonResp({ error: "pending data not found" }, 404);
+  }
+
+  await approvePendingData(env, pendingKey, pendingData, { backup: true, deletePending: true });
+  return jsonResp({ ok: true, action: "approved", entriesCount: pendingData.entries.length });
+}
+
+async function handleApproveAllPending(request, env) {
+  if (!checkAdmin(request, env)) return jsonResp({ error: "unauthorized" }, 401);
+
+  const list = await env.STORE.list({ prefix: "pending:" });
+  const keys = (list.keys || []).map((k) => k.name);
+  if (!keys.length) return jsonResp({ ok: true, approved: 0, entries: 0 });
+
+  let hasRange = false;
+  let hasRobust = false;
+  for (const key of keys) {
+    if (key.startsWith("pending:range:")) hasRange = true;
+    if (key.startsWith("pending:robust:")) hasRobust = true;
+  }
+
+  const backupTs = Date.now();
+  if (hasRange) {
+    await putJson(env, `backup:range:${backupTs}`, { ts: backupTs, ...(await snapshotRangeStore(env)) });
+  }
+  if (hasRobust) {
+    await putJson(env, `backup:robust:${backupTs}`, { ts: backupTs, data: await snapshotRobustStore(env) });
+  }
+
+  let approved = 0;
+  let entryCount = 0;
+  for (const key of keys) {
+    const pendingData = await getJson(env, key);
+    if (!pendingData || !Array.isArray(pendingData.entries)) continue;
+    await approvePendingData(env, key, pendingData, { backup: false, deletePending: true });
+    approved++;
+    entryCount += pendingData.entries.length;
+  }
+
+  return jsonResp({ ok: true, approved, entries: entryCount, directSubmit: envFlag(env.DIRECT_SUBMIT) });
+}
+
 // --- Rollback: restore from backup ---
 async function handleRollback(request, env) {
   if (!checkAdmin(request, env)) return jsonResp({ error: "unauthorized" }, 401);
@@ -405,7 +548,7 @@ export default {
 
       // Verify endpoint (admin)
       if (request.method === "POST" && path === "/api/verify") {
-        return await handleVerify(request, env);
+        return await handleVerifyV2(request, env);
       }
 
       // Read endpoints
@@ -419,6 +562,9 @@ export default {
       // Pending (admin)
       if (request.method === "GET" && path === "/api/pending") {
         return await handleGetPending(request, env);
+      }
+      if (request.method === "POST" && path === "/api/pending/approve-all") {
+        return await handleApproveAllPending(request, env);
       }
 
       // Rollback (admin) — 恢复到备份数据

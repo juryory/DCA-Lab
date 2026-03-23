@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "=== AUSUB DCA Strategy Lab ==="
+echo "=== DCALab DCA Strategy Lab ==="
 
 if ! command -v node >/dev/null 2>&1; then
   echo "[ERROR] Node.js not found. Please install it from https://nodejs.org/"

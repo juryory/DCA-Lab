@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AUSUB &#x540E;&#x53F0;&#x7BA1;&#x7406;</title>
+  <title>DCALab &#x540E;&#x53F0;&#x7BA1;&#x7406;</title>
   <style>
     :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--gold:#9a6818}
     *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI",sans-serif}
@@ -23,7 +23,7 @@
   <div class="wrap">
     <div class="panel">
       <div class="row">
-        <h2 style="margin:0">AUSUB &#x540E;&#x53F0;&#x7BA1;&#x7406;</h2>
+        <h2 style="margin:0">DCALab &#x540E;&#x53F0;&#x7BA1;&#x7406;</h2>
         <a href="/">&#x524D;&#x5F80;&#x6392;&#x884C;&#x699C;</a>
       </div>
       <div id="statusText" class="meta" style="margin-top:8px">&#x52A0;&#x8F7D;&#x4E2D;...</div>
@@ -89,12 +89,12 @@
   </div>
 
   <script>
-    let adminToken = localStorage.getItem("ausub_local_admin_token") || localStorage.getItem("ausub_admin_token") || "";
-    const savedCfApiUrl = localStorage.getItem("ausub_cf_api_url") || "";
+let adminToken = localStorage.getItem("dcalab_local_admin_token") || localStorage.getItem("ausub_local_admin_token") || localStorage.getItem("ausub_admin_token") || "";
+const savedCfApiUrl = localStorage.getItem("dcalab_cf_api_url") || localStorage.getItem("ausub_cf_api_url") || "";
     if (savedCfApiUrl) cfApiUrl.value = savedCfApiUrl;
     if (!adminToken) {
       adminToken = prompt("请输入本地管理员 Token：") || "";
-      if (adminToken) localStorage.setItem("ausub_local_admin_token", adminToken);
+if (adminToken) localStorage.setItem("dcalab_local_admin_token", adminToken);
     }
 
     async function api(path, method = "GET", body) {
@@ -104,10 +104,11 @@
         body: body ? JSON.stringify(body) : undefined
       });
       if (r.status === 401) {
-        localStorage.removeItem("ausub_local_admin_token");
-        localStorage.removeItem("ausub_admin_token");
+  localStorage.removeItem("dcalab_local_admin_token");
+  localStorage.removeItem("ausub_local_admin_token");
+  localStorage.removeItem("ausub_admin_token");
         adminToken = prompt("本地管理员 Token 无效，请重新输入：") || "";
-        if (adminToken) localStorage.setItem("ausub_local_admin_token", adminToken);
+if (adminToken) localStorage.setItem("dcalab_local_admin_token", adminToken);
         throw new Error("认证失败，请刷新重试");
       }
       if (!r.ok) {
@@ -214,7 +215,7 @@
       const apiUrl = String(cfApiUrl.value || "").trim().replace(/\/$/, "");
       const intervalMinutes = Number(cfInterval.value || 30);
       if (!apiUrl) throw new Error("请先填写 Cloudflare Worker API");
-      localStorage.setItem("ausub_cf_api_url", apiUrl);
+  localStorage.setItem("dcalab_cf_api_url", apiUrl);
       return { apiUrl, intervalMinutes };
     }
 

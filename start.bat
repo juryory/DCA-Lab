@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-echo === AUSUB DCA Strategy Lab ===
+echo === DCALab DCA Strategy Lab ===
 
 where node >nul 2>&1
 if %errorlevel% neq 0 (

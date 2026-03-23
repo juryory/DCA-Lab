@@ -615,6 +615,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`AUSUB server running on http://localhost:${PORT}`);
+console.log(`DCALab server running on http://localhost:${PORT}`);
   console.log(`Local admin token: ${LOCAL_ADMIN_TOKEN} (set LOCAL_ADMIN_TOKEN env to change; ADMIN_TOKEN is still supported for compatibility)`);
 });

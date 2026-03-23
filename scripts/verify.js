@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * AUSUB 验证脚本
+ * DCALab 验证脚本
  *
  * 从 Cloudflare Worker 拉取 pending 数据，本地重新回测验证，
  * 结果一致则 approve，不一致则 reject。
@@ -14,6 +14,7 @@
 
 const fs = require("fs");
 const { execFile } = require("child_process");
+const os = require("os");
 const path = require("path");
 const http = require("http");
 const https = require("https");
@@ -129,12 +130,14 @@ function isRetryableNetworkError(err) {
 
 function fetchJsonViaPowerShell(url, method = "GET", body = null, token = null) {
   return new Promise((resolve, reject) => {
+    const responseFile = path.join(os.tmpdir(), `dcalab-verify-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
     const env = {
       ...process.env,
       REQ_URL: url,
       REQ_METHOD: method,
       REQ_BODY: body ? JSON.stringify(body) : "",
       REQ_TOKEN: token || "",
+      RESP_FILE: responseFile,
     };
     const script = [
       "$ProgressPreference='SilentlyContinue'",
@@ -145,14 +148,28 @@ function fetchJsonViaPowerShell(url, method = "GET", body = null, token = null) 
       "} else {",
       "  $resp = Invoke-RestMethod -Uri $env:REQ_URL -Method $env:REQ_METHOD -Headers $headers",
       "}",
-      "$resp | ConvertTo-Json -Depth 100 -Compress",
+      "$json = $resp | ConvertTo-Json -Depth 100 -Compress",
+      "[System.IO.File]::WriteAllText($env:RESP_FILE, $json, [System.Text.Encoding]::UTF8)",
     ].join("; ");
-    execFile("powershell.exe", ["-NoProfile", "-Command", script], { env, windowsHide: true }, (error, stdout, stderr) => {
+    execFile("powershell.exe", ["-NoProfile", "-Command", script], {
+      env,
+      windowsHide: true,
+      maxBuffer: 16 * 1024 * 1024,
+    }, (error, stdout, stderr) => {
       if (error) {
+        try { if (fs.existsSync(responseFile)) fs.unlinkSync(responseFile); } catch (_) {}
         reject(new Error((stderr || error.message || "").trim() || "PowerShell request failed"));
         return;
       }
-      const text = String(stdout || "").trim();
+      let text = "";
+      try {
+        text = fs.existsSync(responseFile) ? fs.readFileSync(responseFile, "utf8").trim() : String(stdout || "").trim();
+      } catch (readErr) {
+        reject(readErr);
+        return;
+      } finally {
+        try { if (fs.existsSync(responseFile)) fs.unlinkSync(responseFile); } catch (_) {}
+      }
       if (!text) {
         resolve(null);
         return;

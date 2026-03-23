@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AUSUB Strategy Lab</title>
+  <title>DCALab Strategy Lab</title>
   <style>
     :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--gold:#9a6818;--gold2:#c58b2a;--good:#1f6b3c;--bad:#973939}
     *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
@@ -43,7 +43,7 @@
 <body>
   <div class="wrap">
     <div class="panel hero">
-      <h1>AUSUB Strategy Lab</h1>
+      <h1>DCALab Strategy Lab</h1>
       <div class="sub">提供两个入口：手动参数回测，或持续随机搜索并实时维护 Top 50 最优组合。</div>
     </div>
 
@@ -377,16 +377,17 @@
     (function () {
       let backendAvailable = false;
       let pollTimer = null;
-      let adminToken = localStorage.getItem("ausub_local_admin_token") || localStorage.getItem("ausub_admin_token") || "";
+let adminToken = localStorage.getItem("dcalab_local_admin_token") || localStorage.getItem("ausub_local_admin_token") || localStorage.getItem("ausub_admin_token") || "";
 
       function ensureAdminToken(forcePrompt) {
         if (!forcePrompt && adminToken) return adminToken;
         const next = prompt("请输入本地管理员 Token") || "";
         adminToken = next.trim();
-        if (adminToken) localStorage.setItem("ausub_local_admin_token", adminToken);
+if (adminToken) localStorage.setItem("dcalab_local_admin_token", adminToken);
         else {
-          localStorage.removeItem("ausub_local_admin_token");
-          localStorage.removeItem("ausub_admin_token");
+localStorage.removeItem("dcalab_local_admin_token");
+localStorage.removeItem("ausub_local_admin_token");
+localStorage.removeItem("ausub_admin_token");
         }
         return adminToken;
       }
@@ -402,8 +403,9 @@
         });
         if (res.status === 401) {
           adminToken = "";
-          localStorage.removeItem("ausub_local_admin_token");
-          localStorage.removeItem("ausub_admin_token");
+localStorage.removeItem("dcalab_local_admin_token");
+localStorage.removeItem("ausub_local_admin_token");
+localStorage.removeItem("ausub_admin_token");
           throw new Error("需要本地管理员 token");
         }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);

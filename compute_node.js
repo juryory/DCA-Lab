@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * AUSUB 分布式计算节点
+ * DCALab 分布式计算节点
  *
  * 独立运行，跑回测计算，定期将好结果提交到 Cloudflare Worker API。
  *
@@ -104,7 +104,11 @@ function postJsonViaPowerShell(url, data) {
       "$resp = Invoke-RestMethod -Uri $env:REQ_URL -Method Post -ContentType 'application/json' -Body $env:REQ_BODY",
       "$resp | ConvertTo-Json -Depth 100 -Compress",
     ].join("; ");
-    execFile("powershell.exe", ["-NoProfile", "-Command", script], { env, windowsHide: true }, (error, stdout, stderr) => {
+    execFile("powershell.exe", ["-NoProfile", "-Command", script], {
+      env,
+      windowsHide: true,
+      maxBuffer: 16 * 1024 * 1024,
+    }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error((stderr || error.message || "").trim() || "PowerShell request failed"));
         return;
@@ -227,7 +231,7 @@ function addToRobustBuffer(results) {
 }
 
 // --- Main ---
-console.log(`[Node] AUSUB compute node starting`);
+console.log(`[Node] DCALab compute node starting`);
 console.log(`[Node] API: ${API_URL}`);
 console.log(`[Node] Submit interval: ${SUBMIT_INTERVAL / 1000}s, batch: ${BATCH}, penalty: ${PENALTY}`);
 
