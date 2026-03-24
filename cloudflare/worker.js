@@ -162,16 +162,16 @@ const HOME_HTML = `<!doctype html>
   <div class="wrap">
     <div class="hero">
       <h1>DCALab</h1>
-      <div class="muted">Multi-asset DCA leaderboard and robustness explorer.</div>
+      <div class="muted">多资产定投排行榜与稳健性探索平台。</div>
     </div>
     <div class="cards">
       <a class="card" href="/range">
-        <h2>Range Leaderboard</h2>
-        <div>View the best strategies for a selected historical year range.</div>
+        <h2>区间排行榜</h2>
+        <div>查看指定历史年份区间内表现最好的定投策略。</div>
       </a>
       <a class="card" href="/robust">
-        <h2>Robust Leaderboard</h2>
-        <div>View the most stable strategies across rolling year windows.</div>
+        <h2>稳健排行榜</h2>
+        <div>查看不同滚动年份窗口下最稳健的策略表现。</div>
       </a>
     </div>
   </div>
@@ -183,7 +183,7 @@ const RANGE_HTML = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DCALab Range Leaderboard</title>
+  <title>DCALab 区间排行榜</title>
   <style>
     :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--good:#1f6b3c;--bad:#973939;--gold:#9a6818}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
@@ -198,29 +198,29 @@ const RANGE_HTML = `<!doctype html>
   <div class="wrap">
     <div class="panel">
       <div class="row">
-        <h2 style="margin:0">Range Leaderboard</h2>
-        <a href="/">Home</a>
+        <h2 style="margin:0">区间排行榜</h2>
+        <a href="/">首页</a>
       </div>
       <div class="row" style="margin-top:8px">
-        <label>Year Range</label>
+        <label>年份区间</label>
         <select id="startYear"></select>
-        <span>to</span>
+        <span>至</span>
         <select id="endYear"></select>
-        <button id="applyBtn">Apply</button>
-        <button id="refreshBtn">Refresh</button>
+        <button id="applyBtn">应用</button>
+        <button id="refreshBtn">刷新</button>
       </div>
-      <div id="meta" class="meta" style="margin-top:8px">Loading...</div>
+      <div id="meta" class="meta" style="margin-top:8px">加载中...</div>
     </div>
     <div class="grid">
       <div class="panel">
         <table>
-          <thead><tr><th>#</th><th>Range</th><th>Score</th><th>Return</th><th>Invested</th><th>Final</th><th>AU</th><th>CSI300</th><th>SP500</th></tr></thead>
-          <tbody id="rows"><tr><td colspan="9">Loading...</td></tr></tbody>
+          <thead><tr><th>#</th><th>区间</th><th>评分</th><th>收益率</th><th>投入</th><th>最终市值</th><th>黄金</th><th>沪深300</th><th>标普500</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="9">加载中...</td></tr></tbody>
         </table>
       </div>
       <div class="detail">
-        <div style="font-weight:700;margin-bottom:6px">Selected Parameters</div>
-        <pre id="detail">Click a row to inspect details.</pre>
+        <div style="font-weight:700;margin-bottom:6px">选中参数</div>
+        <pre id="detail">点击任意一行查看详情。</pre>
       </div>
     </div>
   </div>
@@ -230,10 +230,10 @@ const RANGE_HTML = `<!doctype html>
     const money=v=>Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2});
     async function api(path){const r=await fetch(path);if(!r.ok)throw new Error(\`HTTP \${r.status}\`);return r.json();}
     function deriveBounds(items){let minYear=null,maxYear=null;for(const item of items||[]){const seg=String(item.key||"").split("-");const a=Number(seg[0]),b=Number(seg[1]);if(!Number.isInteger(a)||!Number.isInteger(b))continue;minYear=minYear===null?Math.min(a,b):Math.min(minYear,a,b);maxYear=maxYear===null?Math.max(a,b):Math.max(maxYear,a,b);}return {minYear,maxYear};}
-    function formatEntry(entry){if(!entry)return "No details.";const lines=[];const weights=entry.weights||{};const configs=entry.configs||{};lines.push("Weights");lines.push(\`AU9999: \${((weights.au9999||0)*100).toFixed(0)}%\`);lines.push(\`CSI300: \${((weights.csi300||0)*100).toFixed(0)}%\`);lines.push(\`SP500: \${((weights.sp500||0)*100).toFixed(0)}%\`);lines.push("");for(const key of ["au9999","csi300","sp500"]){const cfg=configs[key];if(!cfg)continue;lines.push(key.toUpperCase());lines.push(\`baseAmount: \${cfg.baseAmount}\`);lines.push(\`dipAmount: \${cfg.dipAmount}\`);lines.push(\`maWindow: \${cfg.maWindow}\`);lines.push(\`scheduleMode: \${cfg.scheduleMode}\`);lines.push(\`buyMode: \${cfg.buyMode}\`);lines.push("");}return lines.join("\\n");}
+    function formatEntry(entry){if(!entry)return "暂无详情。";const lines=[];const weights=entry.weights||{};const configs=entry.configs||{};lines.push("权重");lines.push(\`黄金AU9999: \${((weights.au9999||0)*100).toFixed(0)}%\`);lines.push(\`沪深300: \${((weights.csi300||0)*100).toFixed(0)}%\`);lines.push(\`标普500: \${((weights.sp500||0)*100).toFixed(0)}%\`);lines.push("");for(const key of ["au9999","csi300","sp500"]){const cfg=configs[key];if(!cfg)continue;lines.push(key.toUpperCase());lines.push(\`baseAmount: \${cfg.baseAmount}\`);lines.push(\`dipAmount: \${cfg.dipAmount}\`);lines.push(\`maWindow: \${cfg.maWindow}\`);lines.push(\`scheduleMode: \${cfg.scheduleMode}\`);lines.push(\`buyMode: \${cfg.buyMode}\`);lines.push("");}return lines.join("\\n");}
     function setYearOptions(){if(!Number.isInteger(state.minYear)||!Number.isInteger(state.maxYear))return;const years=[];for(let y=state.minYear;y<=state.maxYear;y++)years.push(y);startYear.innerHTML=years.map(y=>\`<option value="\${y}">\${y}</option>\`).join("");endYear.innerHTML=years.map(y=>\`<option value="\${y}">\${y}</option>\`).join("");const seg=String(state.selectedRange||\`\${state.minYear}-\${state.maxYear}\`).split("-");startYear.value=String(Number(seg[0])||state.minYear);endYear.value=String(Number(seg[1])||state.maxYear);}
-    function render(){setYearOptions();if(!state.entries.length){rows.innerHTML='<tr><td colspan="9">No results for this range.</td></tr>';detail.textContent="No results for this range.";return;}if(state.selectedIndex>=state.entries.length)state.selectedIndex=0;rows.innerHTML=state.entries.map((entry,i)=>{const w=entry.weights||{};return \`<tr data-i="\${i}" class="\${i===state.selectedIndex?"selected":""}"><td>\${i+1}</td><td>\${entry.rangeKey}</td><td>\${Number(entry.score).toFixed(2)}</td><td class="\${entry.returnRate>=0?"good":"bad"}">\${pct(entry.returnRate)}</td><td>\${money(entry.totalInvested)}</td><td>\${money(entry.finalValue)}</td><td>\${((w.au9999||0)*100).toFixed(0)}%</td><td>\${((w.csi300||0)*100).toFixed(0)}%</td><td>\${((w.sp500||0)*100).toFixed(0)}%</td></tr>\`;}).join("");detail.textContent=formatEntry(state.entries[state.selectedIndex]);}
-    async function load(){try{const summary=await api("/api/range?range=all");state.ranges=Array.isArray(summary.ranges)?summary.ranges:[];const bounds=deriveBounds(state.ranges);state.minYear=bounds.minYear;state.maxYear=bounds.maxYear;if(!state.selectedRange&&state.minYear!==null&&state.maxYear!==null)state.selectedRange=\`\${state.minYear}-\${state.maxYear}\`;if(!state.selectedRange){state.entries=[];meta.textContent="No range data.";render();return;}const detailData=await api(\`/api/range?range=\${encodeURIComponent(state.selectedRange)}\`);state.entries=Array.isArray(detailData.entries)?detailData.entries:[];meta.textContent=\`Cloud API | ranges: \${state.ranges.length} | current: \${state.selectedRange}\`;render();}catch(err){meta.textContent=\`Load failed: \${err.message}\`;}}
+    function render(){setYearOptions();if(!state.entries.length){rows.innerHTML='<tr><td colspan="9">当前区间暂无结果。</td></tr>';detail.textContent="当前区间暂无结果。";return;}if(state.selectedIndex>=state.entries.length)state.selectedIndex=0;rows.innerHTML=state.entries.map((entry,i)=>{const w=entry.weights||{};return \`<tr data-i="\${i}" class="\${i===state.selectedIndex?"selected":""}"><td>\${i+1}</td><td>\${entry.rangeKey}</td><td>\${Number(entry.score).toFixed(2)}</td><td class="\${entry.returnRate>=0?"good":"bad"}">\${pct(entry.returnRate)}</td><td>\${money(entry.totalInvested)}</td><td>\${money(entry.finalValue)}</td><td>\${((w.au9999||0)*100).toFixed(0)}%</td><td>\${((w.csi300||0)*100).toFixed(0)}%</td><td>\${((w.sp500||0)*100).toFixed(0)}%</td></tr>\`;}).join("");detail.textContent=formatEntry(state.entries[state.selectedIndex]);}
+    async function load(){try{const summary=await api("/api/range?range=all");state.ranges=Array.isArray(summary.ranges)?summary.ranges:[];const bounds=deriveBounds(state.ranges);state.minYear=bounds.minYear;state.maxYear=bounds.maxYear;if(!state.selectedRange&&state.minYear!==null&&state.maxYear!==null)state.selectedRange=\`\${state.minYear}-\${state.maxYear}\`;if(!state.selectedRange){state.entries=[];meta.textContent="暂无区间数据。";render();return;}const detailData=await api(\`/api/range?range=\${encodeURIComponent(state.selectedRange)}\`);state.entries=Array.isArray(detailData.entries)?detailData.entries:[];meta.textContent=\`云端 API | 区间数量: \${state.ranges.length} | 当前区间: \${state.selectedRange}\`;render();}catch(err){meta.textContent=\`加载失败: \${err.message}\`;}}
     applyBtn.onclick=()=>{const s=Number(startYear.value),e=Number(endYear.value);if(!Number.isInteger(s)||!Number.isInteger(e))return;state.selectedRange=s<=e?\`\${s}-\${e}\`:\`\${e}-\${s}\`;state.selectedIndex=0;load();};
     refreshBtn.onclick=()=>load();
     rows.onclick=(e)=>{const tr=e.target.closest("tr[data-i]");if(!tr)return;state.selectedIndex=Number(tr.dataset.i);render();};
@@ -247,7 +247,7 @@ const ROBUST_HTML = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DCALab Robust Leaderboard</title>
+  <title>DCALab 稳健排行榜</title>
   <style>
     :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--gold:#9a6818;--gold2:#c58b2a;--good:#1f6b3c;--bad:#973939}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
@@ -260,29 +260,29 @@ const ROBUST_HTML = `<!doctype html>
 </head>
 <body>
   <div class="wrap">
-    <div class="panel"><div class="row"><h2 style="margin:0">Robust Leaderboard</h2><a href="/">Home</a></div><div class="meta" style="margin-top:6px">Stable multi-asset strategies ranked by rolling window performance.</div></div>
-    <div class="panel"><div id="statusText" class="meta">Loading...</div></div>
+    <div class="panel"><div class="row"><h2 style="margin:0">稳健排行榜</h2><a href="/">首页</a></div><div class="meta" style="margin-top:6px">按滚动年份窗口表现，筛选最稳健的多资产定投策略。</div></div>
+    <div class="panel"><div id="statusText" class="meta">加载中...</div></div>
     <div class="tabs" id="yearTabs"></div>
     <div class="cards">
-      <div class="card"><div class="k">Best Robust</div><div class="v" id="vBestRobust">-</div></div>
-      <div class="card"><div class="k">Best Avg</div><div class="v" id="vBestAvg">-</div></div>
-      <div class="card"><div class="k">Best Min</div><div class="v" id="vBestMin">-</div></div>
-      <div class="card"><div class="k">Entries</div><div class="v" id="vAttempts">-</div></div>
-      <div class="card"><div class="k">Valid</div><div class="v" id="vValid">-</div></div>
+      <div class="card"><div class="k">最佳稳健分</div><div class="v" id="vBestRobust">-</div></div>
+      <div class="card"><div class="k">最佳平均分</div><div class="v" id="vBestAvg">-</div></div>
+      <div class="card"><div class="k">最佳最低分</div><div class="v" id="vBestMin">-</div></div>
+      <div class="card"><div class="k">结果数量</div><div class="v" id="vAttempts">-</div></div>
+      <div class="card"><div class="k">有效数量</div><div class="v" id="vValid">-</div></div>
     </div>
     <div class="layout">
-      <div class="panel" style="padding:0"><div class="table-wrap"><table><thead><tr><th>#</th><th>Robust</th><th>Avg</th><th>Min</th><th>Max</th><th>StdDev</th><th>Windows</th><th>AU</th><th>CSI300</th><th>SP500</th></tr></thead><tbody id="rows"><tr><td colspan="10">Loading...</td></tr></tbody></table></div></div>
-      <div><div class="detail"><div class="k" style="margin-bottom:6px">Selected Strategy</div><pre id="detail">Click a row to view details.</pre></div></div>
+      <div class="panel" style="padding:0"><div class="table-wrap"><table><thead><tr><th>#</th><th>稳健分</th><th>平均分</th><th>最低分</th><th>最高分</th><th>标准差</th><th>窗口数</th><th>黄金</th><th>沪深300</th><th>标普500</th></tr></thead><tbody id="rows"><tr><td colspan="10">加载中...</td></tr></tbody></table></div></div>
+      <div><div class="detail"><div class="k" style="margin-bottom:6px">选中策略</div><pre id="detail">点击任意一行查看详情。</pre></div></div>
     </div>
   </div>
   <script>
     let selectedYear=3,selectedIdx=0,entries=[];
     async function api(path){const r=await fetch(path);if(!r.ok)throw new Error(\`HTTP \${r.status}\`);return r.json();}
     function renderTabs(){yearTabs.innerHTML="";for(let y=2;y<=8;y++){const tab=document.createElement("div");tab.className="tab"+(y===selectedYear?" active":"");tab.textContent=\`\${y}Y\`;tab.onclick=()=>{selectedYear=y;selectedIdx=0;renderTabs();refresh();};yearTabs.appendChild(tab);}}
-    function formatEntry(entry){if(!entry)return "No details.";const lines=[];const weights=entry.weights||{};const configs=entry.configs||{};lines.push(\`Robust: \${entry.robustScore}\`);lines.push(\`Avg: \${entry.avgScore}\`);lines.push(\`Min: \${entry.minScore}\`);lines.push(\`Max: \${entry.maxScore}\`);lines.push(\`StdDev: \${entry.stdDev}\`);lines.push(\`Window Years: \${entry.windowYears||selectedYear}\`);lines.push(\`Window Count: \${entry.windowCount||(entry.windows?entry.windows.length:"-")}\`);lines.push("");lines.push("Weights");lines.push(\`AU9999: \${((weights.au9999||0)*100).toFixed(0)}%\`);lines.push(\`CSI300: \${((weights.csi300||0)*100).toFixed(0)}%\`);lines.push(\`SP500: \${((weights.sp500||0)*100).toFixed(0)}%\`);lines.push("");for(const key of ["au9999","csi300","sp500"]){const cfg=configs[key];if(!cfg)continue;lines.push(key.toUpperCase());lines.push(\`baseAmount: \${cfg.baseAmount}\`);lines.push(\`dipAmount: \${cfg.dipAmount}\`);lines.push(\`maWindow: \${cfg.maWindow}\`);lines.push(\`buyMode: \${cfg.buyMode}\`);lines.push("");}if(Array.isArray(entry.windows)&&entry.windows.length){lines.push("Windows");lines.push(entry.windows.join(", "));}return lines.join("\\n");}
-    function render(list,count){entries=list||[];vAttempts.textContent=count??entries.length;vValid.textContent=count??entries.length;const best=entries[0];vBestRobust.textContent=best?Number(best.robustScore).toFixed(2):"-";vBestAvg.textContent=best?Number(best.avgScore).toFixed(2):"-";vBestMin.textContent=best?Number(best.minScore).toFixed(2):"-";statusText.textContent=\`Cloud API | year window: \${selectedYear}Y | entries: \${count??entries.length}\`;if(!entries.length){rows.innerHTML='<tr><td colspan="10">No results for this year window.</td></tr>';detail.textContent="No results for this year window.";return;}if(selectedIdx>=entries.length)selectedIdx=0;rows.innerHTML=entries.map((entry,i)=>{const w=entry.weights||{};return \`<tr data-i="\${i}" class="\${i===selectedIdx?"selected":""}"><td>\${i+1}</td><td>\${Number(entry.robustScore).toFixed(2)}</td><td>\${Number(entry.avgScore).toFixed(2)}</td><td>\${Number(entry.minScore).toFixed(2)}</td><td>\${Number(entry.maxScore).toFixed(2)}</td><td>\${Number(entry.stdDev).toFixed(2)}</td><td>\${entry.windowCount||(entry.windows?entry.windows.length:"-")}</td><td>\${((w.au9999||0)*100).toFixed(0)}%</td><td>\${((w.csi300||0)*100).toFixed(0)}%</td><td>\${((w.sp500||0)*100).toFixed(0)}%</td></tr>\`;}).join("");detail.textContent=formatEntry(entries[selectedIdx]);}
+    function formatEntry(entry){if(!entry)return "暂无详情。";const lines=[];const weights=entry.weights||{};const configs=entry.configs||{};lines.push(\`稳健分: \${entry.robustScore}\`);lines.push(\`平均分: \${entry.avgScore}\`);lines.push(\`最低分: \${entry.minScore}\`);lines.push(\`最高分: \${entry.maxScore}\`);lines.push(\`标准差: \${entry.stdDev}\`);lines.push(\`窗口年份: \${entry.windowYears||selectedYear}\`);lines.push(\`窗口数量: \${entry.windowCount||(entry.windows?entry.windows.length:"-")}\`);lines.push("");lines.push("权重");lines.push(\`黄金AU9999: \${((weights.au9999||0)*100).toFixed(0)}%\`);lines.push(\`沪深300: \${((weights.csi300||0)*100).toFixed(0)}%\`);lines.push(\`标普500: \${((weights.sp500||0)*100).toFixed(0)}%\`);lines.push("");for(const key of ["au9999","csi300","sp500"]){const cfg=configs[key];if(!cfg)continue;lines.push(key.toUpperCase());lines.push(\`baseAmount: \${cfg.baseAmount}\`);lines.push(\`dipAmount: \${cfg.dipAmount}\`);lines.push(\`maWindow: \${cfg.maWindow}\`);lines.push(\`buyMode: \${cfg.buyMode}\`);lines.push("");}if(Array.isArray(entry.windows)&&entry.windows.length){lines.push("窗口列表");lines.push(entry.windows.join(", "));}return lines.join("\\n");}
+    function render(list,count){entries=list||[];vAttempts.textContent=count??entries.length;vValid.textContent=count??entries.length;const best=entries[0];vBestRobust.textContent=best?Number(best.robustScore).toFixed(2):"-";vBestAvg.textContent=best?Number(best.avgScore).toFixed(2):"-";vBestMin.textContent=best?Number(best.minScore).toFixed(2):"-";statusText.textContent=\`云端 API | 当前窗口: \${selectedYear} 年 | 结果数: \${count??entries.length}\`;if(!entries.length){rows.innerHTML='<tr><td colspan="10">当前窗口暂无结果。</td></tr>';detail.textContent="当前窗口暂无结果。";return;}if(selectedIdx>=entries.length)selectedIdx=0;rows.innerHTML=entries.map((entry,i)=>{const w=entry.weights||{};return \`<tr data-i="\${i}" class="\${i===selectedIdx?"selected":""}"><td>\${i+1}</td><td>\${Number(entry.robustScore).toFixed(2)}</td><td>\${Number(entry.avgScore).toFixed(2)}</td><td>\${Number(entry.minScore).toFixed(2)}</td><td>\${Number(entry.maxScore).toFixed(2)}</td><td>\${Number(entry.stdDev).toFixed(2)}</td><td>\${entry.windowCount||(entry.windows?entry.windows.length:"-")}</td><td>\${((w.au9999||0)*100).toFixed(0)}%</td><td>\${((w.csi300||0)*100).toFixed(0)}%</td><td>\${((w.sp500||0)*100).toFixed(0)}%</td></tr>\`;}).join("");detail.textContent=formatEntry(entries[selectedIdx]);}
     rows.onclick=(e)=>{const tr=e.target.closest("tr[data-i]");if(!tr)return;selectedIdx=Number(tr.dataset.i);render(entries,entries.length);};
-    async function refresh(){try{const summary=await api("/api/robust");const detailData=await api(\`/api/robust?year=\${selectedYear}\`);const count=(summary.summary&&summary.summary[selectedYear]&&summary.summary[selectedYear].count)||0;render(Array.isArray(detailData.entries)?detailData.entries:[],count);}catch(err){statusText.textContent=\`Refresh failed: \${err.message}\`;}}
+    async function refresh(){try{const summary=await api("/api/robust");const detailData=await api(\`/api/robust?year=\${selectedYear}\`);const count=(summary.summary&&summary.summary[selectedYear]&&summary.summary[selectedYear].count)||0;render(Array.isArray(detailData.entries)?detailData.entries:[],count);}catch(err){statusText.textContent=\`刷新失败: \${err.message}\`;}}
     renderTabs();refresh();setInterval(refresh,15000);
   </script>
 </body>
