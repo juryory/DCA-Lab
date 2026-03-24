@@ -15,7 +15,7 @@ function getArg(name, def) {
   return i >= 0 && args[i + 1] ? args[i + 1] : def;
 }
 
-const API = getArg("api", "https://dcalab.juryory.workers.dev").replace(/\/$/, "");
+const API = getArg("api", "https://dcalab.juryory.com").replace(/\/$/, "");
 const TOKEN = getArg("token", "");
 const BACKUP_DIR = path.resolve(__dirname, "..", "data", "backups");
 

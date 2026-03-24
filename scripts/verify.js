@@ -6,7 +6,7 @@
  * 结果一致则 approve，不一致则 reject。
  *
  * 用法:
- *   node scripts/verify.js --api https://your-worker.workers.dev --token your_admin_token
+ *   node scripts/verify.js --api https://dcalab.juryory.com --token your_admin_token
  *
  * 可选:
  *   --auto      自动循环验证（每60秒检查一次）
@@ -50,13 +50,13 @@ function getArg(name, defaultVal) {
   const idx = args.indexOf(`--${name}`);
   return idx >= 0 && args[idx + 1] ? args[idx + 1] : defaultVal;
 }
-const API_URL = getArg("api", process.env.CLOUDFLARE_API_URL || "https://dcalab.juryory.workers.dev").replace(/\/$/, "");
+const API_URL = getArg("api", process.env.CLOUDFLARE_API_URL || "https://dcalab.juryory.com").replace(/\/$/, "");
 const ADMIN_TOKEN = getArg("token", process.env.CLOUDFLARE_ADMIN_TOKEN || process.env.ADMIN_TOKEN || "");
 const AUTO_MODE = args.includes("--auto");
 const TOLERANCE = 0.01; // 1% tolerance for floating point differences
 
 if (!API_URL) {
-  console.error("用法: node scripts/verify.js --api https://dcalab.juryory.workers.dev --token TOKEN");
+  console.error("用法: node scripts/verify.js --api https://dcalab.juryory.com --token TOKEN");
   process.exit(1);
 }
 

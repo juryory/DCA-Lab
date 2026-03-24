@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DCALab 区间最优解（组合）</title>
+  <title>DCALab 区间排行榜</title>
   <style>
     :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--good:#1f6b3c;--bad:#973939;--gold:#9a6818}
     *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
@@ -30,12 +30,12 @@
   <div class="wrap">
     <div class="panel" style="margin-bottom:12px">
       <div class="row">
-        <h2 style="margin:0">区间最优解（组合）</h2>
-        <a href="/">← 返回主页</a>
-        <a href="/admin">后台管理</a>
+        <h2 style="margin:0">区间排行榜</h2>
+        <a href="/">首页</a>
+        <a href="/admin">后台</a>
       </div>
       <div class="row" style="margin-top:8px">
-        <label>年份区间：</label>
+        <label>年份区间</label>
         <select id="startYear"></select>
         <span>至</span>
         <select id="endYear"></select>
@@ -48,138 +48,169 @@
       <div class="panel">
         <table>
           <thead><tr>
-            <th>排名</th><th>区间</th><th>评分</th><th>收益率</th><th>总投入</th><th>最终市值</th><th>黄金</th><th>沪深300</th><th>标普500</th>
+            <th>#</th><th>区间</th><th>评分</th><th>收益率</th><th>投入</th><th>最终市值</th><th>黄金</th><th>沪深300</th><th>标普500</th>
           </tr></thead>
           <tbody id="rows"><tr><td colspan="9">加载中...</td></tr></tbody>
         </table>
       </div>
       <div class="detail">
-        <div style="font-weight:700;margin-bottom:6px">选中行因子参数</div>
-        <pre id="detail">点击任意一行可查看详细参数。</pre>
+        <div style="font-weight:700;margin-bottom:6px">选中策略参数</div>
+        <pre id="detail">点击任意一行查看详情。</pre>
       </div>
     </div>
   </div>
   <script>
-    const S = { selectedRange: "", selectedIndex: 0, entries: [], ranges: [], minYear: null, maxYear: null };
-    const pct = v => `${(Number(v)*100).toFixed(2)}%`;
-    const money = v => Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2});
+    const state = { selectedRange: "", selectedIndex: 0, entries: [], ranges: [], minYear: null, maxYear: null };
+    const cloudMode = location.hostname === "dcalab.juryory.com";
+    const pct = (v) => `${(Number(v) * 100).toFixed(2)}%`;
+    const money = (v) => Number(v).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    async function api(path){const r=await fetch(path);if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json();}
+    async function api(path) {
+      const r = await fetch(path);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }
 
-    function fmtCfg(entry){
-      if(!entry)return "该行暂无参数。";
-      // 兼容旧格式（单资产 entry.cfg）和新格式（组合 entry.configs + entry.weights）
-      const w=entry.weights||{};
-      const cfgMap=entry.configs||{};
-      const hasPortfolio=Object.keys(cfgMap).length>0;
-      if(!hasPortfolio&&entry.cfg){
-        // 旧格式：单资产
-        const cfg=entry.cfg;
-        const buyMode=cfg.buyMode==="intraday_break_same_close"?"盘中跌破，当日收盘成交":"收盘确认，次日收盘成交";
-        const scheduleMode=cfg.scheduleMode==="weekly_weekday"?"每周固定星期":"每 N 个交易日";
-        const weekday=["-","周一","周二","周三","周四","周五","周六","周日"][cfg.scheduleWeekday]||cfg.scheduleWeekday;
-        const p=v=>`${(Number(v)*100).toFixed(2)}%`;
-        return [
-          `[旧版单资产结果]`,
-          `基础定投金额: ${cfg.baseAmount}  追加金额: ${cfg.dipAmount}`,
-          `定投模式: ${scheduleMode}  周期(天): ${cfg.scheduleDays}  星期: ${weekday}`,
-          `买入方式: ${buyMode}  均线窗口: ${cfg.maWindow}`,
-          `动态定投: ${cfg.dynamicEnabled?"启用":"关闭"}`,
-          `倍率(极弱/偏弱/中性/偏热): ${cfg.oversoldMultiplier}/${cfg.weakMultiplier}/${cfg.neutralMultiplier}/${cfg.hotMultiplier}`,
-          `RSI(超卖/偏弱上限/偏热): ${cfg.oversoldRsi}/${cfg.weakRsiMax}/${cfg.hotRsi}`,
-          `MA20阈值(低/高): ${p(cfg.discountToMa20)}/${p(cfg.premiumToMa20)}`,
-          `回撤(偏弱/深度): ${p(cfg.drawdownWeak)}/${p(cfg.deepDrawdown)}`,
-          `卖出1: 溢价${p(cfg.sell1Premium)} RSI≥${cfg.sell1Rsi} 比例${p(cfg.sell1Pct)}`,
-          `卖出2: 溢价${p(cfg.sell2Premium)} 比例${p(cfg.sell2Pct)} 布林缓冲${p(cfg.sell2BollBuffer)}`,
-          `卖出3: 溢价${p(cfg.sell3Premium)} RSI≥${cfg.sell3Rsi} 比例${p(cfg.sell3Pct)}`,
-        ].join("\n");
-      }
-      // 新格式：组合
-      const wStr=`黄金: ${((w.au9999||0)*100).toFixed(0)}%  沪深300: ${((w.csi300||0)*100).toFixed(0)}%  标普500: ${((w.sp500||0)*100).toFixed(0)}%`;
-      const lines=["=== 资产配比 ===",wStr,""];
-      const labels={au9999:"黄金AU9999",csi300:"沪深300",sp500:"标普500"};
-      for(const key of ["au9999","csi300","sp500"]){
-        const cfg=cfgMap[key];if(!cfg)continue;
-        const buyMode=cfg.buyMode==="intraday_break_same_close"?"盘中跌破，当日收盘成交":"收盘确认，次日收盘成交";
-        const scheduleMode=cfg.scheduleMode==="weekly_weekday"?"每周固定星期":"每 N 个交易日";
-        const weekday=["-","周一","周二","周三","周四","周五","周六","周日"][cfg.scheduleWeekday]||cfg.scheduleWeekday;
-        const p=v=>`${(Number(v)*100).toFixed(2)}%`;
-        lines.push(`=== ${labels[key]} (${((w[key]||0)*100).toFixed(0)}%) ===`);
-        lines.push(`基础定投金额: ${cfg.baseAmount}  追加金额: ${cfg.dipAmount}`);
-        lines.push(`定投模式: ${scheduleMode}  周期(天): ${cfg.scheduleDays}  星期: ${weekday}`);
-        lines.push(`买入方式: ${buyMode}  均线窗口: ${cfg.maWindow}`);
-        lines.push(`动态定投: ${cfg.dynamicEnabled?"启用":"关闭"}`);
-        lines.push(`倍率(极弱/偏弱/中性/偏热): ${cfg.oversoldMultiplier}/${cfg.weakMultiplier}/${cfg.neutralMultiplier}/${cfg.hotMultiplier}`);
-        lines.push(`RSI(超卖/偏弱上限/偏热): ${cfg.oversoldRsi}/${cfg.weakRsiMax}/${cfg.hotRsi}`);
-        lines.push(`MA20阈值(低/高): ${p(cfg.discountToMa20)}/${p(cfg.premiumToMa20)}`);
-        lines.push(`回撤(偏弱/深度): ${p(cfg.drawdownWeak)}/${p(cfg.deepDrawdown)}`);
-        lines.push(`卖出1: 溢价${p(cfg.sell1Premium)} RSI≥${cfg.sell1Rsi} 比例${p(cfg.sell1Pct)}`);
-        lines.push(`卖出2: 溢价${p(cfg.sell2Premium)} 比例${p(cfg.sell2Pct)} 布林缓冲${p(cfg.sell2BollBuffer)}`);
-        lines.push(`卖出3: 溢价${p(cfg.sell3Premium)} RSI≥${cfg.sell3Rsi} 比例${p(cfg.sell3Pct)}`);
+    function formatEntry(entry) {
+      if (!entry) return "暂无详情。";
+      const lines = [];
+      const weights = entry.weights || {};
+      const configs = entry.configs || {};
+      lines.push("权重");
+      lines.push(`黄金AU9999: ${((weights.au9999 || 0) * 100).toFixed(0)}%`);
+      lines.push(`沪深300: ${((weights.csi300 || 0) * 100).toFixed(0)}%`);
+      lines.push(`标普500: ${((weights.sp500 || 0) * 100).toFixed(0)}%`);
+      lines.push("");
+      for (const key of ["au9999", "csi300", "sp500"]) {
+        const cfg = configs[key];
+        if (!cfg) continue;
+        lines.push(key.toUpperCase());
+        lines.push(`baseAmount: ${cfg.baseAmount}`);
+        lines.push(`dipAmount: ${cfg.dipAmount}`);
+        lines.push(`maWindow: ${cfg.maWindow}`);
+        lines.push(`scheduleMode: ${cfg.scheduleMode}`);
+        lines.push(`scheduleDays: ${cfg.scheduleDays ?? "-"}`);
+        lines.push(`scheduleWeekday: ${cfg.scheduleWeekday ?? "-"}`);
+        lines.push(`buyMode: ${cfg.buyMode}`);
+        lines.push(`dynamicEnabled: ${cfg.dynamicEnabled ? "true" : "false"}`);
         lines.push("");
-      }
-      const ad=entry.assetDetails||[];
-      if(ad.length){
-        lines.push("=== 各标的表现 ===");
-        ad.forEach(d=>{
-          if(d.skipped){lines.push(`${d.label}: 跳过 (${d.reason})`);return;}
-          lines.push(`${d.label} (${((d.weight||0)*100).toFixed(0)}%): 收益率 ${pct(d.returnRate)}  投入 ${money(d.totalInvested)}  市值 ${money(d.finalValue)}  交易 ${d.tradeCount}次`);
-        });
       }
       return lines.join("\n");
     }
 
-    let _lastMinYear=null,_lastMaxYear=null;
-    function render(){
-      // 仅在数据年份范围变化时才重建 select options，避免覆盖用户正在调整的选择
-      if(Number.isInteger(S.minYear)&&Number.isInteger(S.maxYear)&&(S.minYear!==_lastMinYear||S.maxYear!==_lastMaxYear)){
-        _lastMinYear=S.minYear;_lastMaxYear=S.maxYear;
-        const years=[];for(let y=S.minYear;y<=S.maxYear;y++)years.push(y);
-        startYear.innerHTML=years.map(y=>`<option value="${y}">${y}</option>`).join("");
-        endYear.innerHTML=years.map(y=>`<option value="${y}">${y}</option>`).join("");
-        const seg=String(S.selectedRange||`${S.minYear}-${S.maxYear}`).split("-");
-        startYear.value=String(Number(seg[0])||S.minYear);
-        endYear.value=String(Number(seg[1])||S.maxYear);
+    function setYearOptions() {
+      if (!Number.isInteger(state.minYear) || !Number.isInteger(state.maxYear)) return;
+      const years = [];
+      for (let y = state.minYear; y <= state.maxYear; y++) years.push(y);
+      startYear.innerHTML = years.map((y) => `<option value="${y}">${y}</option>`).join("");
+      endYear.innerHTML = years.map((y) => `<option value="${y}">${y}</option>`).join("");
+      const seg = String(state.selectedRange || `${state.minYear}-${state.maxYear}`).split("-");
+      startYear.value = String(Number(seg[0]) || state.minYear);
+      endYear.value = String(Number(seg[1]) || state.maxYear);
+    }
+
+    function render() {
+      setYearOptions();
+      if (!state.entries.length) {
+        rows.innerHTML = '<tr><td colspan="9">当前区间暂无结果。</td></tr>';
+        detail.textContent = "当前区间暂无结果。";
+        return;
       }
-      if(!S.entries.length){
-        rows.innerHTML='<tr><td colspan="9">当前区间暂无结果。</td></tr>';
-        detail.textContent="当前区间暂无结果。";return;
-      }
-      if(S.selectedIndex>=S.entries.length)S.selectedIndex=0;
-      rows.innerHTML=S.entries.map((x,i)=>{
-        const w=x.weights||{};
-        return `<tr data-i="${i}" class="${i===S.selectedIndex?"selected":""}">
-        <td>${i+1}</td><td>${x.rangeKey}</td><td>${x.score.toFixed(2)}</td>
-        <td class="${x.returnRate>=0?"good":"bad"}">${pct(x.returnRate)}</td>
-        <td>${money(x.totalInvested)}</td><td>${money(x.finalValue)}</td>
-        <td>${((w.au9999||0)*100).toFixed(0)}%</td>
-        <td>${((w.csi300||0)*100).toFixed(0)}%</td>
-        <td>${((w.sp500||0)*100).toFixed(0)}%</td></tr>`;
+      if (state.selectedIndex >= state.entries.length) state.selectedIndex = 0;
+      rows.innerHTML = state.entries.map((entry, i) => {
+        const w = entry.weights || {};
+        return `<tr data-i="${i}" class="${i === state.selectedIndex ? "selected" : ""}">
+          <td>${i + 1}</td>
+          <td>${entry.rangeKey}</td>
+          <td>${Number(entry.score).toFixed(2)}</td>
+          <td class="${entry.returnRate >= 0 ? "good" : "bad"}">${pct(entry.returnRate)}</td>
+          <td>${money(entry.totalInvested)}</td>
+          <td>${money(entry.finalValue)}</td>
+          <td>${((w.au9999 || 0) * 100).toFixed(0)}%</td>
+          <td>${((w.csi300 || 0) * 100).toFixed(0)}%</td>
+          <td>${((w.sp500 || 0) * 100).toFixed(0)}%</td>
+        </tr>`;
       }).join("");
-      detail.textContent=fmtCfg(S.entries[S.selectedIndex]);
+      detail.textContent = formatEntry(state.entries[state.selectedIndex]);
     }
 
-    async function load(){
-      try{
-        const data=await api(`/api/leaderboard?range=${encodeURIComponent(S.selectedRange)}&limit=10`);
-        S.entries=Array.isArray(data.entries)?data.entries:[];
-        S.ranges=Array.isArray(data.ranges)?data.ranges:[];
-        S.minYear=Number.isInteger(data.meta.minYear)?data.meta.minYear:null;
-        S.maxYear=Number.isInteger(data.meta.maxYear)?data.meta.maxYear:null;
-        if(!S.selectedRange&&S.minYear!==null&&S.maxYear!==null){S.selectedRange=`${S.minYear}-${S.maxYear}`;return load();}
-        meta.textContent=`数据年份: ${data.meta.minYear||"-"}-${data.meta.maxYear||"-"} | 更新: ${data.meta.updatedAt||"-"} | 当前区间: ${S.selectedRange}`;
+    function deriveBounds(ranges) {
+      let minYear = null;
+      let maxYear = null;
+      for (const item of ranges || []) {
+        const seg = String(item.key || "").split("-");
+        const a = Number(seg[0]);
+        const b = Number(seg[1]);
+        if (!Number.isInteger(a) || !Number.isInteger(b)) continue;
+        minYear = minYear === null ? Math.min(a, b) : Math.min(minYear, a, b);
+        maxYear = maxYear === null ? Math.max(a, b) : Math.max(maxYear, a, b);
+      }
+      return { minYear, maxYear };
+    }
+
+    async function loadCloud() {
+      const summary = await api("/api/range?range=all");
+      state.ranges = Array.isArray(summary.ranges) ? summary.ranges : [];
+      const bounds = deriveBounds(state.ranges);
+      state.minYear = bounds.minYear;
+      state.maxYear = bounds.maxYear;
+      if (!state.selectedRange && state.minYear !== null && state.maxYear !== null) {
+        state.selectedRange = `${state.minYear}-${state.maxYear}`;
+      }
+      if (!state.selectedRange) {
+        state.entries = [];
+        meta.textContent = "云端 API 暂无区间数据。";
         render();
-      }catch(err){meta.textContent=`读取失败: ${err.message}`;}
+        return;
+      }
+      const detailData = await api(`/api/range?range=${encodeURIComponent(state.selectedRange)}`);
+      state.entries = Array.isArray(detailData.entries) ? detailData.entries : [];
+      meta.textContent = `云端 API | 区间数量: ${state.ranges.length} | 当前区间: ${state.selectedRange}`;
+      render();
     }
 
-    applyBtn.onclick=()=>{
-      const s=Number(startYear.value),e=Number(endYear.value);
-      if(!Number.isInteger(s)||!Number.isInteger(e))return;
-      S.selectedRange=s<=e?`${s}-${e}`:`${e}-${s}`;S.selectedIndex=0;load();
+    async function loadLocal() {
+      const data = await api(`/api/leaderboard?range=${encodeURIComponent(state.selectedRange)}&limit=10`);
+      state.entries = Array.isArray(data.entries) ? data.entries : [];
+      state.ranges = Array.isArray(data.ranges) ? data.ranges : [];
+      state.minYear = Number.isInteger(data.meta.minYear) ? data.meta.minYear : null;
+      state.maxYear = Number.isInteger(data.meta.maxYear) ? data.meta.maxYear : null;
+      if (!state.selectedRange && state.minYear !== null && state.maxYear !== null) {
+        state.selectedRange = `${state.minYear}-${state.maxYear}`;
+        return loadLocal();
+      }
+      meta.textContent = `本地 API | 数据年份: ${data.meta.minYear || "-"}-${data.meta.maxYear || "-"} | 更新时间: ${data.meta.updatedAt || "-"} | 当前区间: ${state.selectedRange}`;
+      render();
+    }
+
+    async function load() {
+      try {
+        if (cloudMode) return await loadCloud();
+        return await loadLocal();
+      } catch (err) {
+        meta.textContent = `加载失败: ${err.message}`;
+      }
+    }
+
+    applyBtn.onclick = () => {
+      const s = Number(startYear.value);
+      const e = Number(endYear.value);
+      if (!Number.isInteger(s) || !Number.isInteger(e)) return;
+      state.selectedRange = s <= e ? `${s}-${e}` : `${e}-${s}`;
+      state.selectedIndex = 0;
+      load();
     };
-    refreshBtn.onclick=()=>load();
-    rows.onclick=e=>{const tr=e.target.closest("tr[data-i]");if(!tr)return;S.selectedIndex=Number(tr.dataset.i);render();};
-    load();setInterval(load,5000);
+
+    refreshBtn.onclick = () => load();
+    rows.onclick = (e) => {
+      const tr = e.target.closest("tr[data-i]");
+      if (!tr) return;
+      state.selectedIndex = Number(tr.dataset.i);
+      render();
+    };
+
+    load();
+    setInterval(load, cloudMode ? 15000 : 5000);
   </script>
 </body>
 </html>

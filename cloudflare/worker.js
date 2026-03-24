@@ -134,6 +134,160 @@ async function snapshotRangeStore(env) {
   };
 }
 
+function htmlResp(html, status = 200) {
+  return new Response(html, {
+    status,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+const HOME_HTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DCALab</title>
+  <style>
+    :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--gold:#9a6818}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
+    .wrap{max-width:960px;margin:0 auto;padding:36px 20px}.hero{margin-bottom:24px}.hero h1{margin:0 0 8px;font-size:32px}
+    .cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.card{display:block;text-decoration:none;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:28px}
+    .card h2{margin:0 0 10px;color:var(--gold)}.muted{color:var(--muted)}@media(max-width:700px){.cards{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <h1>DCALab</h1>
+      <div class="muted">Multi-asset DCA leaderboard and robustness explorer.</div>
+    </div>
+    <div class="cards">
+      <a class="card" href="/range">
+        <h2>Range Leaderboard</h2>
+        <div>View the best strategies for a selected historical year range.</div>
+      </a>
+      <a class="card" href="/robust">
+        <h2>Robust Leaderboard</h2>
+        <div>View the most stable strategies across rolling year windows.</div>
+      </a>
+    </div>
+  </div>
+</body>
+</html>`;
+
+const RANGE_HTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DCALab Range Leaderboard</title>
+  <style>
+    :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--good:#1f6b3c;--bad:#973939;--gold:#9a6818}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
+    .wrap{max-width:1280px;margin:0 auto;padding:20px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.meta{font-size:12px;color:var(--muted)}select,button{padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+    table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1px solid #eee4d3;text-align:left}th{color:var(--muted)}tbody tr{cursor:pointer}.selected{background:#f8f0df}
+    .grid{display:grid;grid-template-columns:1.2fr 1fr;gap:12px}.detail{border:1px solid var(--line);border-radius:12px;padding:10px;background:#fff}pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.45 Consolas,"Courier New",monospace}
+    .good{color:var(--good)} .bad{color:var(--bad)} a{color:var(--gold);text-decoration:none}@media(max-width:980px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <div class="row">
+        <h2 style="margin:0">Range Leaderboard</h2>
+        <a href="/">Home</a>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label>Year Range</label>
+        <select id="startYear"></select>
+        <span>to</span>
+        <select id="endYear"></select>
+        <button id="applyBtn">Apply</button>
+        <button id="refreshBtn">Refresh</button>
+      </div>
+      <div id="meta" class="meta" style="margin-top:8px">Loading...</div>
+    </div>
+    <div class="grid">
+      <div class="panel">
+        <table>
+          <thead><tr><th>#</th><th>Range</th><th>Score</th><th>Return</th><th>Invested</th><th>Final</th><th>AU</th><th>CSI300</th><th>SP500</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="9">Loading...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="detail">
+        <div style="font-weight:700;margin-bottom:6px">Selected Parameters</div>
+        <pre id="detail">Click a row to inspect details.</pre>
+      </div>
+    </div>
+  </div>
+  <script>
+    const state={selectedRange:"",selectedIndex:0,entries:[],ranges:[],minYear:null,maxYear:null};
+    const pct=v=>\`\${(Number(v)*100).toFixed(2)}%\`;
+    const money=v=>Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2});
+    async function api(path){const r=await fetch(path);if(!r.ok)throw new Error(\`HTTP \${r.status}\`);return r.json();}
+    function deriveBounds(items){let minYear=null,maxYear=null;for(const item of items||[]){const seg=String(item.key||"").split("-");const a=Number(seg[0]),b=Number(seg[1]);if(!Number.isInteger(a)||!Number.isInteger(b))continue;minYear=minYear===null?Math.min(a,b):Math.min(minYear,a,b);maxYear=maxYear===null?Math.max(a,b):Math.max(maxYear,a,b);}return {minYear,maxYear};}
+    function formatEntry(entry){if(!entry)return "No details.";const lines=[];const weights=entry.weights||{};const configs=entry.configs||{};lines.push("Weights");lines.push(\`AU9999: \${((weights.au9999||0)*100).toFixed(0)}%\`);lines.push(\`CSI300: \${((weights.csi300||0)*100).toFixed(0)}%\`);lines.push(\`SP500: \${((weights.sp500||0)*100).toFixed(0)}%\`);lines.push("");for(const key of ["au9999","csi300","sp500"]){const cfg=configs[key];if(!cfg)continue;lines.push(key.toUpperCase());lines.push(\`baseAmount: \${cfg.baseAmount}\`);lines.push(\`dipAmount: \${cfg.dipAmount}\`);lines.push(\`maWindow: \${cfg.maWindow}\`);lines.push(\`scheduleMode: \${cfg.scheduleMode}\`);lines.push(\`buyMode: \${cfg.buyMode}\`);lines.push("");}return lines.join("\\n");}
+    function setYearOptions(){if(!Number.isInteger(state.minYear)||!Number.isInteger(state.maxYear))return;const years=[];for(let y=state.minYear;y<=state.maxYear;y++)years.push(y);startYear.innerHTML=years.map(y=>\`<option value="\${y}">\${y}</option>\`).join("");endYear.innerHTML=years.map(y=>\`<option value="\${y}">\${y}</option>\`).join("");const seg=String(state.selectedRange||\`\${state.minYear}-\${state.maxYear}\`).split("-");startYear.value=String(Number(seg[0])||state.minYear);endYear.value=String(Number(seg[1])||state.maxYear);}
+    function render(){setYearOptions();if(!state.entries.length){rows.innerHTML='<tr><td colspan="9">No results for this range.</td></tr>';detail.textContent="No results for this range.";return;}if(state.selectedIndex>=state.entries.length)state.selectedIndex=0;rows.innerHTML=state.entries.map((entry,i)=>{const w=entry.weights||{};return \`<tr data-i="\${i}" class="\${i===state.selectedIndex?"selected":""}"><td>\${i+1}</td><td>\${entry.rangeKey}</td><td>\${Number(entry.score).toFixed(2)}</td><td class="\${entry.returnRate>=0?"good":"bad"}">\${pct(entry.returnRate)}</td><td>\${money(entry.totalInvested)}</td><td>\${money(entry.finalValue)}</td><td>\${((w.au9999||0)*100).toFixed(0)}%</td><td>\${((w.csi300||0)*100).toFixed(0)}%</td><td>\${((w.sp500||0)*100).toFixed(0)}%</td></tr>\`;}).join("");detail.textContent=formatEntry(state.entries[state.selectedIndex]);}
+    async function load(){try{const summary=await api("/api/range?range=all");state.ranges=Array.isArray(summary.ranges)?summary.ranges:[];const bounds=deriveBounds(state.ranges);state.minYear=bounds.minYear;state.maxYear=bounds.maxYear;if(!state.selectedRange&&state.minYear!==null&&state.maxYear!==null)state.selectedRange=\`\${state.minYear}-\${state.maxYear}\`;if(!state.selectedRange){state.entries=[];meta.textContent="No range data.";render();return;}const detailData=await api(\`/api/range?range=\${encodeURIComponent(state.selectedRange)}\`);state.entries=Array.isArray(detailData.entries)?detailData.entries:[];meta.textContent=\`Cloud API | ranges: \${state.ranges.length} | current: \${state.selectedRange}\`;render();}catch(err){meta.textContent=\`Load failed: \${err.message}\`;}}
+    applyBtn.onclick=()=>{const s=Number(startYear.value),e=Number(endYear.value);if(!Number.isInteger(s)||!Number.isInteger(e))return;state.selectedRange=s<=e?\`\${s}-\${e}\`:\`\${e}-\${s}\`;state.selectedIndex=0;load();};
+    refreshBtn.onclick=()=>load();
+    rows.onclick=(e)=>{const tr=e.target.closest("tr[data-i]");if(!tr)return;state.selectedIndex=Number(tr.dataset.i);render();};
+    load();setInterval(load,15000);
+  </script>
+</body>
+</html>`;
+
+const ROBUST_HTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DCALab Robust Leaderboard</title>
+  <style>
+    :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--gold:#9a6818;--gold2:#c58b2a;--good:#1f6b3c;--bad:#973939}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
+    .wrap{max-width:1400px;margin:0 auto;padding:24px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:12px}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.meta{font-size:12px;color:var(--muted)}.tabs{display:flex;gap:6px;margin:12px 0}
+    .tab{padding:8px 16px;border:1px solid var(--line);border-radius:999px;cursor:pointer;background:#fff;font-size:13px}.tab.active{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#fff;border-color:transparent}
+    .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}.card{padding:12px;border:1px solid var(--line);border-radius:14px;background:#fff}.k{font-size:12px;color:var(--muted)}.v{font-size:20px;font-weight:700}
+    .layout{display:grid;grid-template-columns:1fr 1fr;gap:12px}.table-wrap{max-height:500px;overflow:auto;border:1px solid var(--line);border-radius:14px;background:#fff}table{width:100%;border-collapse:collapse;font-size:13px}th,td{border-bottom:1px solid #eee4d3;padding:8px 6px;text-align:left}th{position:sticky;top:0;background:#fff;color:var(--muted)}tbody tr{cursor:pointer}.selected{background:#f8f0df}.detail{border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff}pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.5 Consolas,"Courier New",monospace}a{color:var(--gold);text-decoration:none}@media(max-width:1000px){.cards{grid-template-columns:repeat(3,1fr)}.layout{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel"><div class="row"><h2 style="margin:0">Robust Leaderboard</h2><a href="/">Home</a></div><div class="meta" style="margin-top:6px">Stable multi-asset strategies ranked by rolling window performance.</div></div>
+    <div class="panel"><div id="statusText" class="meta">Loading...</div></div>
+    <div class="tabs" id="yearTabs"></div>
+    <div class="cards">
+      <div class="card"><div class="k">Best Robust</div><div class="v" id="vBestRobust">-</div></div>
+      <div class="card"><div class="k">Best Avg</div><div class="v" id="vBestAvg">-</div></div>
+      <div class="card"><div class="k">Best Min</div><div class="v" id="vBestMin">-</div></div>
+      <div class="card"><div class="k">Entries</div><div class="v" id="vAttempts">-</div></div>
+      <div class="card"><div class="k">Valid</div><div class="v" id="vValid">-</div></div>
+    </div>
+    <div class="layout">
+      <div class="panel" style="padding:0"><div class="table-wrap"><table><thead><tr><th>#</th><th>Robust</th><th>Avg</th><th>Min</th><th>Max</th><th>StdDev</th><th>Windows</th><th>AU</th><th>CSI300</th><th>SP500</th></tr></thead><tbody id="rows"><tr><td colspan="10">Loading...</td></tr></tbody></table></div></div>
+      <div><div class="detail"><div class="k" style="margin-bottom:6px">Selected Strategy</div><pre id="detail">Click a row to view details.</pre></div></div>
+    </div>
+  </div>
+  <script>
+    let selectedYear=3,selectedIdx=0,entries=[];
+    async function api(path){const r=await fetch(path);if(!r.ok)throw new Error(\`HTTP \${r.status}\`);return r.json();}
+    function renderTabs(){yearTabs.innerHTML="";for(let y=2;y<=8;y++){const tab=document.createElement("div");tab.className="tab"+(y===selectedYear?" active":"");tab.textContent=\`\${y}Y\`;tab.onclick=()=>{selectedYear=y;selectedIdx=0;renderTabs();refresh();};yearTabs.appendChild(tab);}}
+    function formatEntry(entry){if(!entry)return "No details.";const lines=[];const weights=entry.weights||{};const configs=entry.configs||{};lines.push(\`Robust: \${entry.robustScore}\`);lines.push(\`Avg: \${entry.avgScore}\`);lines.push(\`Min: \${entry.minScore}\`);lines.push(\`Max: \${entry.maxScore}\`);lines.push(\`StdDev: \${entry.stdDev}\`);lines.push(\`Window Years: \${entry.windowYears||selectedYear}\`);lines.push(\`Window Count: \${entry.windowCount||(entry.windows?entry.windows.length:"-")}\`);lines.push("");lines.push("Weights");lines.push(\`AU9999: \${((weights.au9999||0)*100).toFixed(0)}%\`);lines.push(\`CSI300: \${((weights.csi300||0)*100).toFixed(0)}%\`);lines.push(\`SP500: \${((weights.sp500||0)*100).toFixed(0)}%\`);lines.push("");for(const key of ["au9999","csi300","sp500"]){const cfg=configs[key];if(!cfg)continue;lines.push(key.toUpperCase());lines.push(\`baseAmount: \${cfg.baseAmount}\`);lines.push(\`dipAmount: \${cfg.dipAmount}\`);lines.push(\`maWindow: \${cfg.maWindow}\`);lines.push(\`buyMode: \${cfg.buyMode}\`);lines.push("");}if(Array.isArray(entry.windows)&&entry.windows.length){lines.push("Windows");lines.push(entry.windows.join(", "));}return lines.join("\\n");}
+    function render(list,count){entries=list||[];vAttempts.textContent=count??entries.length;vValid.textContent=count??entries.length;const best=entries[0];vBestRobust.textContent=best?Number(best.robustScore).toFixed(2):"-";vBestAvg.textContent=best?Number(best.avgScore).toFixed(2):"-";vBestMin.textContent=best?Number(best.minScore).toFixed(2):"-";statusText.textContent=\`Cloud API | year window: \${selectedYear}Y | entries: \${count??entries.length}\`;if(!entries.length){rows.innerHTML='<tr><td colspan="10">No results for this year window.</td></tr>';detail.textContent="No results for this year window.";return;}if(selectedIdx>=entries.length)selectedIdx=0;rows.innerHTML=entries.map((entry,i)=>{const w=entry.weights||{};return \`<tr data-i="\${i}" class="\${i===selectedIdx?"selected":""}"><td>\${i+1}</td><td>\${Number(entry.robustScore).toFixed(2)}</td><td>\${Number(entry.avgScore).toFixed(2)}</td><td>\${Number(entry.minScore).toFixed(2)}</td><td>\${Number(entry.maxScore).toFixed(2)}</td><td>\${Number(entry.stdDev).toFixed(2)}</td><td>\${entry.windowCount||(entry.windows?entry.windows.length:"-")}</td><td>\${((w.au9999||0)*100).toFixed(0)}%</td><td>\${((w.csi300||0)*100).toFixed(0)}%</td><td>\${((w.sp500||0)*100).toFixed(0)}%</td></tr>\`;}).join("");detail.textContent=formatEntry(entries[selectedIdx]);}
+    rows.onclick=(e)=>{const tr=e.target.closest("tr[data-i]");if(!tr)return;selectedIdx=Number(tr.dataset.i);render(entries,entries.length);};
+    async function refresh(){try{const summary=await api("/api/robust");const detailData=await api(\`/api/robust?year=\${selectedYear}\`);const count=(summary.summary&&summary.summary[selectedYear]&&summary.summary[selectedYear].count)||0;render(Array.isArray(detailData.entries)?detailData.entries:[],count);}catch(err){statusText.textContent=\`Refresh failed: \${err.message}\`;}}
+    renderTabs();refresh();setInterval(refresh,15000);
+  </script>
+</body>
+</html>`;
+
 async function snapshotRobustStore(env) {
   const robustSnap = {};
   for (let y = 2; y <= 8; y++) {
@@ -538,6 +692,16 @@ export default {
     }
 
     try {
+      if (request.method === "GET" && (path === "/" || path === "/index.html")) {
+        return htmlResp(HOME_HTML);
+      }
+      if (request.method === "GET" && (path === "/range" || path === "/range.html")) {
+        return htmlResp(RANGE_HTML);
+      }
+      if (request.method === "GET" && (path === "/robust" || path === "/robust.html")) {
+        return htmlResp(ROBUST_HTML);
+      }
+
       // Submit endpoints
       if (request.method === "POST" && path === "/api/submit/range") {
         return await handleSubmitRange(request, env);

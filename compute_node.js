@@ -5,7 +5,7 @@
  * 独立运行，跑回测计算，定期将好结果提交到 Cloudflare Worker API。
  *
  * 用法:
- *   node compute_node.js [--api https://your-worker.workers.dev] [--interval 30]
+ *   node compute_node.js [--api https://dcalab.juryory.com] [--interval 30]
  *
  * 参数:
  *   --api       Worker API 地址（必填）
@@ -49,13 +49,13 @@ function getArg(name, defaultVal) {
   return idx >= 0 && args[idx + 1] ? args[idx + 1] : defaultVal;
 }
 
-const API_URL = getArg("api", process.env.CLOUDFLARE_API_URL || "https://dcalab.juryory.workers.dev").replace(/\/$/, "");
+const API_URL = getArg("api", process.env.CLOUDFLARE_API_URL || "https://dcalab.juryory.com").replace(/\/$/, "");
 const SUBMIT_INTERVAL = Number(getArg("interval", process.env.COMPUTE_SUBMIT_INTERVAL_SECONDS || "30")) * 1000;
 const BATCH = Number(getArg("batch", process.env.COMPUTE_BATCH || "50"));
 const PENALTY = Number(getArg("penalty", process.env.COMPUTE_PENALTY || "0.08"));
 
 if (!API_URL) {
-  console.error("请指定 Worker API 地址: node compute_node.js --api https://dcalab.juryory.workers.dev");
+  console.error("请指定 API 地址: node compute_node.js --api https://dcalab.juryory.com");
   process.exit(1);
 }
 
