@@ -74,12 +74,6 @@ node compute_node.js --api https://your-worker.workers.dev
 
 任何人都可以运行计算节点贡献算力。
 
-### 验证提交
-
-```bash
-node scripts/verify.js --api https://your-worker.workers.dev --token YOUR_ADMIN_TOKEN --auto
-```
-
 ### 备份数据
 
 ```bash
@@ -103,7 +97,6 @@ cloudflare/
   worker.js            — Cloudflare Worker API（提交/验证/查询）
 compute_node.js        — 分布式计算节点
 scripts/
-  verify.js            — 提交验证脚本
   backup_kv.js         — KV 数据备份
   fetch_early_data.py  — 历史数据拉取
 ```

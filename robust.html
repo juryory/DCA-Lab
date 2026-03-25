@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DCALab 稳健排行榜</title>
   <style>
-    :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--gold:#9a6818;--gold2:#c58b2a;--good:#1f6b3c;--bad:#973939}
-    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
+    :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--gold:#9a6818;--gold2:#c58b2a;--good:#1f6b3c;--bad:#973939;--soft:#f8f0df;--soft2:#f3e7d2}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
     .wrap{max-width:1400px;margin:0 auto;padding:24px}
     .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:12px}
     .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -16,17 +17,35 @@
     .tab.active{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#fff;border-color:transparent}
     .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
     .card{padding:12px;border:1px solid var(--line);border-radius:14px;background:#fff}
-    .k{font-size:12px;color:var(--muted)} .v{font-size:20px;font-weight:700}
-    .good{color:var(--good)} .bad{color:var(--bad)}
+    .k{font-size:12px;color:var(--muted)}
+    .v{font-size:20px;font-weight:700}
+    .good{color:var(--good)}
+    .bad{color:var(--bad)}
     .layout{display:grid;grid-template-columns:1fr 1fr;gap:12px}
     .table-wrap{max-height:500px;overflow:auto;border:1px solid var(--line);border-radius:14px;background:#fff}
     table{width:100%;border-collapse:collapse;font-size:13px}
     th,td{border-bottom:1px solid #eee4d3;padding:8px 6px;text-align:left}
     th{position:sticky;top:0;background:#fff;color:var(--muted)}
-    tbody tr{cursor:pointer} tbody tr.selected{background:#f8f0df}
-    .detail{border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff}
-    pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.5 Consolas,"Courier New",monospace}
+    tbody tr{cursor:pointer}
+    tbody tr.selected{background:var(--soft)}
+    .detail{border:1px solid var(--line);border-radius:12px;padding:14px;background:#fff}
+    .detail-empty{color:var(--muted);padding:8px 0}
+    .section{margin-top:14px}
+    .section-title{font-size:13px;font-weight:700;margin:0 0 8px}
+    .asset-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+    .asset-card{border:1px solid var(--line);border-radius:14px;padding:12px;background:#fffdfa}
+    .asset-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}
+    .asset-name{font-weight:700}
+    .asset-points{display:grid;gap:6px}
+    .point{font-size:13px;color:var(--text)}
+    .point strong{color:var(--muted);font-weight:600}
+    .point code{font:12px/1.4 Consolas,"Courier New",monospace;background:#f8f0df;padding:1px 5px;border-radius:999px}
+    .mini-table{width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+    .mini-table th,.mini-table td{padding:8px 6px;border-bottom:1px solid #eee4d3;text-align:left}
+    .mini-table th{background:#fcf7ef;color:var(--muted);position:static}
+    .mini-wrap{overflow:auto;border-radius:12px}
     a{color:var(--gold);text-decoration:none}
+    @media(max-width:1100px){.asset-grid{grid-template-columns:1fr}}
     @media(max-width:1000px){.cards{grid-template-columns:repeat(3,1fr)}.layout{grid-template-columns:1fr}}
   </style>
 </head>
@@ -68,15 +87,20 @@
       </div>
       <div>
         <div class="detail">
-          <div class="k" style="margin-bottom:6px">选中策略</div>
-          <pre id="detail">点击任意一行查看详情。</pre>
+          <div class="k" style="margin-bottom:8px">各窗口回测结果</div>
+          <div id="detail" class="detail-empty">点击任意一行查看窗口回测结果。</div>
         </div>
       </div>
+    </div>
+
+    <div class="panel">
+      <div class="k" style="margin-bottom:8px">3个资产策略参数</div>
+      <div id="strategyParams" class="detail-empty">点击任意一行查看详细策略参数。</div>
     </div>
   </div>
 
   <script>
-    let selectedYear = 3;
+    let selectedYear = 1;
     let selectedIdx = 0;
     let entries = [];
     let lastMeta = {};
@@ -94,7 +118,7 @@
 
     function renderTabs() {
       yearTabs.innerHTML = "";
-      for (let y = 2; y <= 8; y++) {
+      for (let y = 1; y <= 10; y++) {
         const tab = document.createElement("div");
         tab.className = "tab" + (y === selectedYear ? " active" : "");
         tab.textContent = `${y}Y`;
@@ -108,42 +132,120 @@
       }
     }
 
-    function formatEntry(entry) {
-      if (!entry) return "暂无详情。";
-      const lines = [];
-      const weights = entry.weights || {};
-      const configs = entry.configs || {};
-      lines.push(`Robust: ${entry.robustScore}`);
-      lines.push(`Avg: ${entry.avgScore}`);
-      lines.push(`Min: ${entry.minScore}`);
-      lines.push(`Max: ${entry.maxScore}`);
-      lines.push(`StdDev: ${entry.stdDev}`);
-      lines.push(`窗口年份: ${entry.windowYears || selectedYear}`);
-      lines.push(`窗口数量: ${entry.windowCount || (entry.windows ? entry.windows.length : "-")}`);
-      lines.push("");
-      lines.push("权重");
-      lines.push(`黄金AU9999: ${((weights.au9999 || 0) * 100).toFixed(0)}%`);
-      lines.push(`沪深300: ${((weights.csi300 || 0) * 100).toFixed(0)}%`);
-      lines.push(`标普500: ${((weights.sp500 || 0) * 100).toFixed(0)}%`);
-      lines.push("");
-      for (const key of ["au9999", "csi300", "sp500"]) {
-        const cfg = configs[key];
-        if (!cfg) continue;
-        lines.push(key.toUpperCase());
-        lines.push(`baseAmount: ${cfg.baseAmount}`);
-        lines.push(`dipAmount: ${cfg.dipAmount}`);
-        lines.push(`maWindow: ${cfg.maWindow}`);
-        lines.push(`scheduleMode: ${cfg.scheduleMode}`);
-        lines.push(`scheduleDays: ${cfg.scheduleDays ?? "-"}`);
-        lines.push(`scheduleWeekday: ${cfg.scheduleWeekday ?? "-"}`);
-        lines.push(`buyMode: ${cfg.buyMode}`);
-        lines.push("");
+    function n(v, digits = 2) {
+      const num = Number(v);
+      return Number.isFinite(num) ? num.toFixed(digits) : "-";
+    }
+
+    function pct(v) {
+      return `${n((Number(v) || 0) * 100, 0)}%`;
+    }
+
+    function formatSchedule(cfg) {
+      if (!cfg) return "-";
+      if (cfg.scheduleMode === "every_n_days") return `每 ${cfg.scheduleDays ?? "-"} 天一次`;
+      if (cfg.scheduleMode === "weekly_weekday") return `每周 ${["一", "二", "三", "四", "五", "六", "日"][Number(cfg.scheduleWeekday) - 1] || "-"}`;
+      if (cfg.scheduleMode === "weekly") return `每周 ${["一","二","三","四","五","六","日"][Number(cfg.scheduleWeekday) - 1] || "-"}`;
+      if (cfg.scheduleMode === "monthly") return "按月定投";
+      return cfg.scheduleMode || "-";
+    }
+
+    function formatScheduleMode(mode) {
+      const map = {
+        every_n_days: "按固定天数定投",
+        weekly: "按周定投",
+        weekly_weekday: "按周几定投",
+        monthly: "按月定投",
+      };
+      return map[mode] || mode || "-";
+    }
+
+    function formatBuyMode(mode) {
+      const map = {
+        close_confirm_next_close: "收盘确认，下一交易日收盘买入",
+        intraday_break_same_close: "盘中触发，当天收盘买入",
+        close_break_same_close: "收盘触发，当天收盘买入",
+        close_break_next_close: "收盘触发，下一交易日收盘买入",
+      };
+      return map[mode] || mode || "-";
+    }
+
+    function formatWeekday(weekday) {
+      const label = ["一", "二", "三", "四", "五", "六", "日"][Number(weekday) - 1];
+      return label ? `周${label}` : "-";
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function renderAssetCard(key, label, entry) {
+      const cfg = (entry.configs || {})[key];
+      if (!cfg) return "";
+      const showScheduleDays = cfg.scheduleMode === "every_n_days";
+      const showWeekday = cfg.scheduleMode === "weekly" || cfg.scheduleMode === "weekly_weekday";
+      return `<div class="asset-card">
+        <div class="asset-head">
+          <div class="asset-name">${escapeHtml(label)}</div>
+        </div>
+        <div class="asset-points">
+          <div class="point"><strong>基础定投</strong> ${escapeHtml(cfg.baseAmount)}</div>
+          <div class="point"><strong>回撤加仓</strong> ${escapeHtml(cfg.dipAmount)}</div>
+          <div class="point"><strong>均线窗口</strong> ${escapeHtml(cfg.maWindow)} 日</div>
+          <div class="point"><strong>定投频率</strong> ${escapeHtml(formatSchedule(cfg))}</div>
+          <div class="point"><strong>频率模式</strong> ${escapeHtml(formatScheduleMode(cfg.scheduleMode))}</div>
+          ${showScheduleDays ? `<div class="point"><strong>间隔天数</strong> ${escapeHtml(cfg.scheduleDays ?? "-")}</div>` : ""}
+          ${showWeekday ? `<div class="point"><strong>星期设置</strong> ${escapeHtml(formatWeekday(cfg.scheduleWeekday))}</div>` : ""}
+          <div class="point"><strong>买入方式</strong> ${escapeHtml(formatBuyMode(cfg.buyMode))}</div>
+        </div>
+      </div>`;
+    }
+
+    function money(v) {
+      const num = Number(v);
+      return Number.isFinite(num) ? num.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-";
+    }
+
+    function pctScore(v) {
+      const num = Number(v);
+      return Number.isFinite(num) ? `${(num * 100).toFixed(2)}%` : "-";
+    }
+
+    function renderWindowRows(entry) {
+      const details = Array.isArray(entry.details) ? entry.details : [];
+      if (!details.length) {
+        return '<div class="detail-empty">当前没有窗口明细。</div>';
       }
-      if (Array.isArray(entry.windows) && entry.windows.length) {
-        lines.push("窗口列表");
-        lines.push(entry.windows.join(", "));
-      }
-      return lines.join("\n");
+      return `<div class="mini-wrap">
+        <table class="mini-table">
+          <thead>
+            <tr><th>窗口</th><th>收益率</th><th>投入</th><th>最终市值</th><th>交易数</th></tr>
+          </thead>
+          <tbody>
+            ${details.map((item) => `<tr>
+              <td>${escapeHtml(item.range || "-")}</td>
+              <td class="${Number(item.returnRate) >= 0 ? "good" : "bad"}">${pctScore(item.returnRate)}</td>
+              <td>${money(item.totalInvested)}</td>
+              <td>${money(item.finalValue)}</td>
+              <td>${escapeHtml(item.tradeCount ?? "-")}</td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`;
+    }
+
+    function renderParamsHtml(entry) {
+      if (!entry) return '<div class="detail-empty">当前暂无策略参数。</div>';
+      return `<div class="asset-grid">
+        ${renderAssetCard("au9999", "黄金 AU9999", entry)}
+        ${renderAssetCard("csi300", "沪深300", entry)}
+        ${renderAssetCard("sp500", "标普500", entry)}
+      </div>`;
     }
 
     function render(data) {
@@ -156,12 +258,13 @@
         ? `云端 API | 当前窗口: ${selectedYear} 年 | 结果数: ${entries.length}`
         : `${meta.running ? "运行中" : "已停止"} | 窗口数: ${meta.windowCount || "-"} | 数据年份: ${meta.minYear || "-"}-${meta.maxYear || "-"} | 当前窗口: ${selectedYear} 年`;
       const best = entries[0];
-      vBestRobust.textContent = best ? Number(best.robustScore).toFixed(2) : "-";
-      vBestAvg.textContent = best ? Number(best.avgScore).toFixed(2) : "-";
-      vBestMin.textContent = best ? Number(best.minScore).toFixed(2) : "-";
+      vBestRobust.textContent = best ? n(best.robustScore) : "-";
+      vBestAvg.textContent = best ? n(best.avgScore) : "-";
+      vBestMin.textContent = best ? n(best.minScore) : "-";
       if (!entries.length) {
         rows.innerHTML = '<tr><td colspan="10">当前窗口暂无结果。</td></tr>';
-        detail.textContent = "当前窗口暂无结果。";
+        detail.innerHTML = '<div class="detail-empty">当前窗口暂无结果。</div>';
+        strategyParams.innerHTML = '<div class="detail-empty">当前窗口暂无策略参数。</div>';
         return;
       }
       if (selectedIdx >= entries.length) selectedIdx = 0;
@@ -169,18 +272,19 @@
         const w = entry.weights || {};
         return `<tr data-i="${i}" class="${i === selectedIdx ? "selected" : ""}">
           <td>${i + 1}</td>
-          <td>${Number(entry.robustScore).toFixed(2)}</td>
-          <td>${Number(entry.avgScore).toFixed(2)}</td>
-          <td class="${entry.minScore >= 0 ? "good" : "bad"}">${Number(entry.minScore).toFixed(2)}</td>
-          <td>${Number(entry.maxScore).toFixed(2)}</td>
-          <td>${Number(entry.stdDev).toFixed(2)}</td>
+          <td>${n(entry.robustScore)}</td>
+          <td>${n(entry.avgScore)}</td>
+          <td class="${Number(entry.minScore) >= 0 ? "good" : "bad"}">${n(entry.minScore)}</td>
+          <td>${n(entry.maxScore)}</td>
+          <td>${n(entry.stdDev)}</td>
           <td>${entry.windowCount || (entry.windows ? entry.windows.length : "-")}</td>
-          <td>${((w.au9999 || 0) * 100).toFixed(0)}%</td>
-          <td>${((w.csi300 || 0) * 100).toFixed(0)}%</td>
-          <td>${((w.sp500 || 0) * 100).toFixed(0)}%</td>
+          <td>${pct(w.au9999 || 0)}</td>
+          <td>${pct(w.csi300 || 0)}</td>
+          <td>${pct(w.sp500 || 0)}</td>
         </tr>`;
       }).join("");
-      detail.textContent = formatEntry(entries[selectedIdx]);
+      detail.innerHTML = renderWindowRows(entries[selectedIdx]);
+      strategyParams.innerHTML = renderParamsHtml(entries[selectedIdx]);
     }
 
     rows.onclick = (e) => {

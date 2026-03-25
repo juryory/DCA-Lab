@@ -415,7 +415,7 @@ class RobustSearchRunner {
 
     this.storePath = path.resolve(runner.dataDir, "robust_store.json");
     this.topByYear = {};
-    for (let y = 2; y <= 8; y++) this.topByYear[y] = [];
+    for (let y = 1; y <= 10; y++) this.topByYear[y] = [];
     this._dirty = false;
     this._lastSaveAt = 0;
     this._loadStore();
@@ -427,7 +427,7 @@ class RobustSearchRunner {
       const raw = fs.readFileSync(this.storePath, "utf8");
       const parsed = JSON.parse(raw);
       if (parsed && parsed.topByYear && typeof parsed.topByYear === "object") {
-        for (let y = 2; y <= 8; y++) {
+        for (let y = 1; y <= 10; y++) {
           if (Array.isArray(parsed.topByYear[y])) this.topByYear[y] = parsed.topByYear[y];
         }
       }
@@ -466,7 +466,7 @@ class RobustSearchRunner {
     this.workerCount = Number(opts.workerCount) > 0 ? Number(opts.workerCount) : this.workerCount;
     this.running = true;
     this._startWorkers();
-    console.log(`[Robust] started (${this.workerCount} worker${this.workerCount > 1 ? "s" : ""}), years=2-8, count=${this.windowCount}, batch=${this.batch}`);
+    console.log(`[Robust] started (${this.workerCount} worker${this.workerCount > 1 ? "s" : ""}), years=1-10, count=${this.windowCount}, batch=${this.batch}`);
   }
 
   stop() {
@@ -513,7 +513,7 @@ class RobustSearchRunner {
           this.valid++;
           row.updatedAt = nowBeijing();
           const yr = row.windowYears;
-          if (yr >= 2 && yr <= 8) {
+          if (yr >= 1 && yr <= 10) {
             const list = this.topByYear[yr];
             list.push(row);
             list.sort((a, b) => b.robustScore - a.robustScore);
@@ -541,7 +541,7 @@ class RobustSearchRunner {
   leaderboard(year, limit = 10) {
     const yr = Number(year);
     const lim = Math.min(Math.max(Number(limit) || 10, 1), 200);
-    if (yr >= 2 && yr <= 8) {
+    if (yr >= 1 && yr <= 10) {
       return {
         year: yr,
         entries: (this.topByYear[yr] || []).slice(0, lim),
@@ -554,7 +554,7 @@ class RobustSearchRunner {
       };
     }
     const summary = {};
-    for (let y = 2; y <= 8; y++) {
+    for (let y = 1; y <= 10; y++) {
       const list = this.topByYear[y] || [];
       summary[y] = { count: list.length, best: list[0] ? list[0].robustScore : null };
     }
@@ -571,7 +571,7 @@ class RobustSearchRunner {
 
   status() {
     const topCounts = {};
-    for (let y = 2; y <= 8; y++) topCounts[y] = (this.topByYear[y] || []).length;
+    for (let y = 1; y <= 10; y++) topCounts[y] = (this.topByYear[y] || []).length;
     return {
       running: this.running, attempts: this.attempts, valid: this.valid, skipped: this.skipped,
       batch: this.batch, penalty: this.penalty, windowCount: this.windowCount,

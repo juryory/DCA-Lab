@@ -125,7 +125,7 @@ function evaluateRobust(portfolioCfg, windows) {
 
 // Elite pool for genetic algorithm (per year-window)
 const elitePools = {}; // { yr: [{robustScore, portfolioCfg}] }
-for (let y = 2; y <= 8; y++) elitePools[y] = [];
+for (let y = 1; y <= 10; y++) elitePools[y] = [];
 const ELITE_SIZE = 20;
 const RANDOM_RATIO = 0.3;
 
@@ -159,7 +159,7 @@ function loop() {
   const results = [];
   for (let i = 0; i < batch; i++) {
     try {
-      for (let yr = 2; yr <= 8; yr++) {
+      for (let yr = 1; yr <= 10; yr++) {
         const portfolioCfg = generateConfig(yr);
         const windows = buildWindows(yr);
         if (windows.length < 2) continue;

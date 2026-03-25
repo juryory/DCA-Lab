@@ -41,7 +41,7 @@ function fetchJson(url) {
   const rangeData = await fetchJson(`${API}/api/range?range=all`);
   // Backup robust data (all years)
   const robustData = {};
-  for (let y = 2; y <= 8; y++) {
+  for (let y = 1; y <= 10; y++) {
     robustData[y] = await fetchJson(`${API}/api/robust?year=${y}`);
   }
 

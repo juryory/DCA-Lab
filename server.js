@@ -42,6 +42,7 @@ const uploadIntervals = new Set([10, 20, 30, 60]);
 const cloudSync = {
   enabled: false,
   apiUrl: "",
+  adminToken: "",
   intervalMinutes: 30,
   timer: null,
   lastRunAt: null,
@@ -127,33 +128,47 @@ function text(res, status, payload, type = "text/plain; charset=utf-8") {
 }
 
 function postJson(targetUrl, payload) {
+  return requestJson(targetUrl, { method: "POST", body: payload });
+}
+
+function requestJson(targetUrl, options = {}) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(targetUrl);
     const mod = parsed.protocol === "https:" ? https : http;
-    const body = JSON.stringify(payload);
+    const method = options.method || "GET";
+    const body = options.body === undefined ? null : JSON.stringify(options.body);
+    const headers = { ...(options.headers || {}) };
+    if (body !== null) {
+      headers["Content-Type"] = headers["Content-Type"] || "application/json";
+      headers["Content-Length"] = Buffer.byteLength(body);
+    }
     const req = mod.request({
       hostname: parsed.hostname,
       port: parsed.port,
       path: parsed.pathname + parsed.search,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(body),
-      },
+      method,
+      headers,
     }, (resp) => {
       const chunks = [];
       resp.on("data", (c) => chunks.push(c));
       resp.on("end", () => {
         const raw = Buffer.concat(chunks).toString("utf8");
+        let parsedBody = null;
         try {
-          resolve(JSON.parse(raw));
+          parsedBody = raw ? JSON.parse(raw) : null;
         } catch (_) {
-          resolve({ raw });
+          parsedBody = raw ? { raw } : null;
         }
+        if (resp.statusCode >= 200 && resp.statusCode < 300) {
+          resolve(parsedBody);
+          return;
+        }
+        const msg = parsedBody && parsedBody.error ? parsedBody.error : `HTTP ${resp.statusCode}`;
+        reject(new Error(msg));
       });
     });
     req.on("error", reject);
-    req.write(body);
+    if (body !== null) req.write(body);
     req.end();
   });
 }
@@ -206,7 +221,7 @@ const STATIC_WHITELIST = new Set([
 
 function serveStatic(reqPath, res) {
   const root = process.cwd();
-  let target = reqPath === "/" ? "leaderboard.html" : reqPath.slice(1);
+  let target = reqPath === "/" ? "robust.html" : reqPath.slice(1);
   if (reqPath === "/admin") target = "admin.html";
   if (reqPath === "/lab") target = "strategy_lab.html";
   if (reqPath === "/robust") target = "robust.html";
@@ -388,31 +403,62 @@ function collectRobustEntries() {
   ]));
 }
 
-async function uploadToCloudflare(apiUrl) {
+async function uploadToCloudflare(apiUrl, adminTokenValue) {
   const cleanApiUrl = String(apiUrl || "").trim().replace(/\/$/, "");
   if (!cleanApiUrl) throw new Error("missing apiUrl");
+  const adminToken = String(adminTokenValue || "").trim();
+  if (!adminToken) throw new Error("missing adminToken");
 
-  const rangeEntries = collectRangeEntries();
-  const robustEntries = collectRobustEntries();
+  const localByYear = {};
+  for (let y = 1; y <= 10; y++) {
+    localByYear[y] = Array.isArray(robustRunner.topByYear[y]) ? robustRunner.topByYear[y] : [];
+  }
+  const remoteSummary = await requestJson(`${cleanApiUrl}/api/robust`);
+  const remoteByYear = {};
+  for (let y = 1; y <= 10; y++) {
+    const count = remoteSummary && remoteSummary.summary && remoteSummary.summary[y] ? remoteSummary.summary[y].count : 0;
+    if (!count) {
+      remoteByYear[y] = [];
+      continue;
+    }
+    const detail = await requestJson(`${cleanApiUrl}/api/robust?year=${y}`);
+    remoteByYear[y] = Array.isArray(detail && detail.entries) ? detail.entries : [];
+  }
+
+  const mergedTopByYear = {};
+  let mergedCount = 0;
+  for (let y = 1; y <= 10; y++) {
+    const deduped = dedupeEntries(
+      [...(remoteByYear[y] || []), ...(localByYear[y] || [])],
+      (entry) => JSON.stringify([
+        entry.windowYears,
+        entry.robustScore,
+        entry.avgScore,
+        entry.minScore,
+        entry.maxScore,
+        entry.stdDev,
+        entry.windows,
+        entry.weights,
+        entry.configs,
+      ])
+    ).sort((a, b) => Number(b.robustScore) - Number(a.robustScore)).slice(0, 10);
+    mergedTopByYear[y] = deduped;
+    mergedCount += deduped.length;
+  }
+
   const result = {
     apiUrl: cleanApiUrl,
     rangeSubmitted: 0,
-    robustSubmitted: 0,
-    rangeResponse: null,
+    robustSubmitted: mergedCount,
+    remoteCount: Object.values(remoteByYear).reduce((sum, arr) => sum + arr.length, 0),
+    localCount: Object.values(localByYear).reduce((sum, arr) => sum + arr.length, 0),
     robustResponse: null,
   };
-
-  if (rangeEntries.length) {
-    result.rangeResponse = await postJson(`${cleanApiUrl}/api/submit/range`, { results: rangeEntries });
-    result.rangeSubmitted = rangeEntries.length;
-  }
-  if (robustEntries.length) {
-    result.robustResponse = await postJson(`${cleanApiUrl}/api/submit/robust`, { results: robustEntries });
-    result.robustSubmitted = robustEntries.length;
-  }
-  if (!rangeEntries.length && !robustEntries.length) {
-    result.message = "no local results to upload";
-  }
+  result.robustResponse = await requestJson(`${cleanApiUrl}/api/admin/robust/replace`, {
+    method: "POST",
+    body: { topByYear: mergedTopByYear },
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
 
   cloudSync.lastRunAt = new Date().toISOString();
   cloudSync.lastResult = result;
@@ -425,21 +471,24 @@ function stopCloudSync() {
   cloudSync.timer = null;
 }
 
-function startCloudSync(apiUrl, intervalMinutes) {
+function startCloudSync(apiUrl, intervalMinutes, adminToken) {
   const minutes = Number(intervalMinutes);
   if (!uploadIntervals.has(minutes)) throw new Error("invalid interval");
   const cleanApiUrl = String(apiUrl || "").trim().replace(/\/$/, "");
+  const cleanAdminToken = String(adminToken || "").trim();
   if (!cleanApiUrl) throw new Error("missing apiUrl");
+  if (!cleanAdminToken) throw new Error("missing adminToken");
 
   stopCloudSync();
   cloudSync.enabled = true;
   cloudSync.apiUrl = cleanApiUrl;
+  cloudSync.adminToken = cleanAdminToken;
   cloudSync.intervalMinutes = minutes;
   cloudSync.timer = setInterval(async () => {
     if (cloudSync.running) return;
     cloudSync.running = true;
     try {
-      await uploadToCloudflare(cloudSync.apiUrl);
+      await uploadToCloudflare(cloudSync.apiUrl, cloudSync.adminToken);
     } catch (err) {
       cloudSync.lastRunAt = new Date().toISOString();
       cloudSync.lastResult = { error: err.message, apiUrl: cloudSync.apiUrl };
@@ -454,6 +503,7 @@ function cloudSyncStatus() {
     enabled: cloudSync.enabled,
     running: cloudSync.running,
     apiUrl: cloudSync.apiUrl,
+    hasAdminToken: Boolean(cloudSync.adminToken),
     intervalMinutes: cloudSync.intervalMinutes,
     lastRunAt: cloudSync.lastRunAt,
     lastResult: cloudSync.lastResult,
@@ -579,14 +629,14 @@ const server = http.createServer(async (req, res) => {
 
       if (req.method === "POST" && pathname === "/api/admin/cloudflare/upload") {
         const body = await readJson(req);
-        const result = await uploadToCloudflare(body && body.apiUrl);
+        const result = await uploadToCloudflare(body && body.apiUrl, body && body.adminToken);
         json(res, 200, { ok: true, result, cloudSync: cloudSyncStatus() });
         return;
       }
 
       if (req.method === "POST" && pathname === "/api/admin/cloudflare/auto-start") {
         const body = await readJson(req);
-        startCloudSync(body && body.apiUrl, Number(body && body.intervalMinutes));
+        startCloudSync(body && body.apiUrl, Number(body && body.intervalMinutes), body && body.adminToken);
         json(res, 200, { ok: true, cloudSync: cloudSyncStatus() });
         return;
       }
