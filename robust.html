@@ -236,6 +236,11 @@
       if (!details.length) {
         return '<div class="detail-empty">当前没有窗口明细。</div>';
       }
+      const cnt = details.length;
+      const avgReturn = details.reduce((s, d) => s + (Number(d.returnRate) || 0), 0) / cnt;
+      const totalInv = details.reduce((s, d) => s + (Number(d.totalInvested) || 0), 0);
+      const totalVal = details.reduce((s, d) => s + (Number(d.finalValue) || 0), 0);
+      const totalTrades = details.reduce((s, d) => s + (Number(d.tradeCount) || 0), 0);
       return `<div class="mini-wrap">
         <table class="mini-table">
           <thead>
@@ -250,6 +255,15 @@
               <td>${escapeHtml(item.tradeCount ?? "-")}</td>
             </tr>`).join("")}
           </tbody>
+          <tfoot>
+            <tr style="font-weight:700;border-top:2px solid #dfd3c0">
+              <td>平均/合计</td>
+              <td class="${avgReturn >= 0 ? "good" : "bad"}">${pctScore(avgReturn)}</td>
+              <td>${money(totalInv)}</td>
+              <td>${money(totalVal)}</td>
+              <td>${totalTrades}</td>
+            </tr>
+          </tfoot>
         </table>
       </div>`;
     }
