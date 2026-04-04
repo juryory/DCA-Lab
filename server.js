@@ -80,20 +80,13 @@ function availableTaskSlots() {
   return Math.min(taskWorkerLimit(), remaining);
 }
 
-function desiredSearchWorkers(kind, requested) {
+function desiredSearchWorkers(requested) {
   const explicit = Number(requested);
   if (explicit > 0) return explicit;
 
   const budget = totalWorkerBudget();
   const reservedForTasks = Math.min(1, taskWorkerLimit());
-  const currentRange = runner.workers ? runner.workers.size : 0;
-  const currentRobust = robustRunner.workers ? robustRunner.workers.size : 0;
-  const otherActive = kind === "range" ? currentRobust : currentRange;
-  const remaining = Math.max(1, budget - reservedForTasks - otherActive);
-
-  if (kind === "range") {
-    return Math.min(runner.workerCount || 1, remaining);
-  }
+  const remaining = Math.max(1, budget - reservedForTasks);
   return Math.min(robustRunner.workerCount || 1, remaining);
 }
 
@@ -153,8 +146,6 @@ function checkAuth(req) {
 
 // --- Static file serving with whitelist ---
 const STATIC_WHITELIST = new Set([
-  "leaderboard.html",
-  "range.html",
   "admin.html",
   "strategy_lab.html",
   "robust.html",
@@ -167,7 +158,6 @@ function serveStatic(reqPath, res) {
   if (reqPath === "/admin") target = "admin.html";
   if (reqPath === "/lab") target = "strategy_lab.html";
   if (reqPath === "/robust") target = "robust.html";
-  if (reqPath === "/range") target = "range.html";
   if (reqPath === "/au9999_history.csv") target = "data/au9999_history.csv";
 
   const safe = path.normalize(target).replace(/\\/g, "/");
@@ -444,14 +434,6 @@ const server = http.createServer(async (req, res) => {
   const pathname = url.pathname;
 
   try {
-    // Public API: leaderboard
-    if (req.method === "GET" && pathname === "/api/leaderboard") {
-      const range = url.searchParams.get("range") || "all";
-      const limit = Number(url.searchParams.get("limit") || 50);
-      json(res, 200, runner.leaderboard(range, limit));
-      return;
-    }
-
     // Public API: task status for strategy_lab
     if (req.method === "GET" && pathname === "/api/random/tasks") {
       json(res, 200, getTasksStatus());
@@ -512,19 +494,6 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      if (req.method === "POST" && pathname === "/api/admin/start") {
-        const body = await readJson(req);
-        runner.start({ ...(body || {}), workerCount: desiredSearchWorkers("range", body && body.workerCount) });
-        json(res, 200, { ok: true, status: runner.status() });
-        return;
-      }
-
-      if (req.method === "POST" && pathname === "/api/admin/stop") {
-        runner.stop();
-        json(res, 200, { ok: true, status: runner.status() });
-        return;
-      }
-
       if (req.method === "POST" && pathname === "/api/admin/upload-csv") {
         const body = await readJson(req);
         const filename = body && body.filename ? String(body.filename) : "uploaded_history.csv";
@@ -541,7 +510,7 @@ const server = http.createServer(async (req, res) => {
 
       if (req.method === "POST" && pathname === "/api/admin/robust/start") {
         const body = await readJson(req);
-        robustRunner.start({ ...(body || {}), workerCount: desiredSearchWorkers("robust", body && body.workerCount) });
+        robustRunner.start({ ...(body || {}), workerCount: desiredSearchWorkers(body && body.workerCount) });
         json(res, 200, { ok: true, status: robustRunner.status() });
         return;
       }
