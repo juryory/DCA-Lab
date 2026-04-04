@@ -67,7 +67,20 @@
       <h3 class="title">导出并推送</h3>
       <div class="row">
         <label>线上页面: <input id="siteUrl" type="text" placeholder="https://dcalab.juryory.com" style="width:320px"></label>
-        <button class="primary" id="exportBtn">比对合并 & 推送到 GitHub</button>
+        <label>自动间隔:
+          <select id="autoInterval" style="width:120px">
+            <option value="0">手动</option>
+            <option value="30">30 分钟</option>
+            <option value="60" selected>1 小时</option>
+            <option value="120">2 小时</option>
+            <option value="360">6 小时</option>
+            <option value="720">12 小时</option>
+            <option value="1440">24 小时</option>
+          </select>
+        </label>
+        <button class="primary" id="exportBtn">立即推送</button>
+        <button class="primary" id="autoStartBtn">启动自动</button>
+        <button id="autoStopBtn">停止自动</button>
       </div>
       <div class="meta" style="margin-top:6px">生成 index.html → git commit & push → Cloudflare Pages 自动部署。如填写线上页面 URL，会先拉取现有数据与本地比对合并（每窗口保留前 10），首次推送可留空。</div>
       <div id="exportStatus" class="meta" style="margin-top:6px"></div>
@@ -164,36 +177,81 @@
       }
     };
 
+    function getSiteUrl() {
+      const url = String(siteUrl.value || "").trim().replace(/\/$/, "");
+      if (url) localStorage.setItem("dcalab_site_url", url);
+      return url;
+    }
+
+    function showExportResult(out) {
+      let msg = `本地 ${out.localCount} 条`;
+      if (out.remoteCount > 0) msg += ` + 线上 ${out.remoteCount} 条`;
+      msg += ` → 合并 ${out.mergedCount} 条`;
+      if (out.pushed) msg += ` | 已推送到 GitHub`;
+      else msg += ` | 已生成 ${out.file}（未推送）`;
+      exportStatus.textContent = msg;
+      if (out.comparison && out.comparison.length) {
+        const lines = ["窗口  本地最佳    线上最佳    本地数  线上数  胜出"];
+        for (const c of out.comparison) {
+          const lb = c.localBest !== null ? String(c.localBest).padStart(10) : "       N/A";
+          const rb = c.remoteBest !== null ? String(c.remoteBest).padStart(10) : "       N/A";
+          lines.push(`${String(c.year).padStart(2)}Y  ${lb}  ${rb}  ${String(c.localCount).padStart(6)}  ${String(c.remoteCount).padStart(6)}  ${c.winner}`);
+        }
+        exportCompare.textContent = lines.join("\n");
+        exportCompare.style.display = "block";
+      }
+    }
+
     exportBtn.onclick = async () => {
       exportStatus.textContent = "正在处理...";
       exportCompare.style.display = "none";
       try {
-        const url = String(siteUrl.value || "").trim().replace(/\/$/, "");
-        if (url) localStorage.setItem("dcalab_site_url", url);
-        const out = await api("/api/admin/export-static", "POST", { siteUrl: url });
-        let msg = `本地 ${out.localCount} 条`;
-        if (out.remoteCount > 0) msg += ` + 线上 ${out.remoteCount} 条`;
-        msg += ` → 合并 ${out.mergedCount} 条`;
-        if (out.pushed) msg += ` | 已推送到 GitHub`;
-        else msg += ` | 已生成 ${out.file}（无远程仓库，未推送）`;
-        exportStatus.textContent = msg;
-        if (out.comparison && out.comparison.length) {
-          const lines = ["窗口  本地最佳    线上最佳    本地数  线上数  胜出"];
-          for (const c of out.comparison) {
-            const lb = c.localBest !== null ? String(c.localBest).padStart(10) : "       N/A";
-            const rb = c.remoteBest !== null ? String(c.remoteBest).padStart(10) : "       N/A";
-            lines.push(`${String(c.year).padStart(2)}Y  ${lb}  ${rb}  ${String(c.localCount).padStart(6)}  ${String(c.remoteCount).padStart(6)}  ${c.winner}`);
-          }
-          exportCompare.textContent = lines.join("\n");
-          exportCompare.style.display = "block";
-        }
+        const out = await api("/api/admin/export-static", "POST", { siteUrl: getSiteUrl() });
+        showExportResult(out);
       } catch (err) {
         exportStatus.textContent = `失败: ${err.message}`;
       }
     };
 
+    autoStartBtn.onclick = async () => {
+      const interval = Number(autoInterval.value);
+      if (!interval) { exportStatus.textContent = "请选择自动间隔（不能选手动）"; return; }
+      try {
+        await api("/api/admin/auto-push/start", "POST", { siteUrl: getSiteUrl(), intervalMinutes: interval });
+        exportStatus.textContent = `自动推送已启动，每 ${interval >= 60 ? (interval / 60) + " 小时" : interval + " 分钟"} 一次`;
+      } catch (err) {
+        exportStatus.textContent = `启动失败: ${err.message}`;
+      }
+    };
+
+    autoStopBtn.onclick = async () => {
+      try {
+        await api("/api/admin/auto-push/stop", "POST", {});
+        exportStatus.textContent = "自动推送已停止";
+      } catch (err) {
+        exportStatus.textContent = `停止失败: ${err.message}`;
+      }
+    };
+
+    // Show auto-push status in refresh
+    async function refreshAutoPush() {
+      try {
+        const s = await api("/api/admin/auto-push/status");
+        if (s.active) {
+          const iv = s.intervalMinutes >= 60 ? (s.intervalMinutes / 60) + "h" : s.intervalMinutes + "min";
+          let t = `自动推送: 每${iv}`;
+          if (s.lastRunAt) t += ` | 上次: ${s.lastRunAt.slice(0, 16)}`;
+          if (s.lastError) t += ` | 错误: ${s.lastError}`;
+          if (s.running) t += ` | 执行中...`;
+          exportStatus.textContent = t;
+        }
+      } catch (_) {}
+    }
+
     refresh();
+    refreshAutoPush();
     setInterval(refresh, 2000);
+    setInterval(refreshAutoPush, 10000);
   </script>
 </body>
 </html>

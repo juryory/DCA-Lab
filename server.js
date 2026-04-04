@@ -428,6 +428,112 @@ function buildStaticHtml(dataByYear) {
 </html>`;
 }
 
+// --- Auto push ---
+const autoPush = { timer: null, intervalMinutes: 0, siteUrl: "", lastRunAt: null, lastError: null, running: false };
+
+async function doExportAndPush(siteUrl) {
+  const localByYear = {};
+  for (let y = 1; y <= 10; y++) {
+    localByYear[y] = Array.isArray(robustRunner.topByYear[y]) ? robustRunner.topByYear[y] : [];
+  }
+  const localCount = Object.values(localByYear).reduce((s, a) => s + a.length, 0);
+
+  let remoteByYear = {};
+  let remoteCount = 0;
+  let comparison = [];
+  if (siteUrl) {
+    const html = await new Promise((resolve, reject) => {
+      const mod = siteUrl.startsWith("https") ? https : http;
+      mod.get(siteUrl, (resp) => {
+        if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
+          mod.get(resp.headers.location, (r2) => {
+            const c = []; r2.on("data", d => c.push(d)); r2.on("end", () => resolve(Buffer.concat(c).toString("utf8")));
+          }).on("error", reject);
+          return;
+        }
+        const c = []; resp.on("data", d => c.push(d)); resp.on("end", () => resolve(Buffer.concat(c).toString("utf8")));
+      }).on("error", reject);
+    });
+    const m = html.match(/const\s+ALL_DATA\s*=\s*(\{[\s\S]*?\});/);
+    if (m) {
+      const parsed = JSON.parse(m[1]);
+      for (let y = 1; y <= 10; y++) {
+        remoteByYear[y] = Array.isArray(parsed[y]) ? parsed[y] : [];
+      }
+      remoteCount = Object.values(remoteByYear).reduce((s, a) => s + a.length, 0);
+    }
+    for (let y = 1; y <= 10; y++) {
+      const lb = localByYear[y] && localByYear[y][0] ? localByYear[y][0].robustScore : null;
+      const rb = remoteByYear[y] && remoteByYear[y][0] ? remoteByYear[y][0].robustScore : null;
+      comparison.push({
+        year: y,
+        localBest: lb !== null ? Number(Number(lb).toFixed(4)) : null,
+        remoteBest: rb !== null ? Number(Number(rb).toFixed(4)) : null,
+        localCount: (localByYear[y] || []).length,
+        remoteCount: (remoteByYear[y] || []).length,
+        winner: lb === null && rb === null ? "none" : lb === null ? "remote" : rb === null ? "local" : lb >= rb ? "local" : "remote",
+      });
+    }
+  }
+
+  const mergedByYear = {};
+  for (let y = 1; y <= 10; y++) {
+    mergedByYear[y] = dedupeEntries(
+      [...(localByYear[y] || []), ...(remoteByYear[y] || [])],
+      (e) => JSON.stringify([e.robustScore, e.avgScore, e.minScore, e.maxScore, e.stdDev, e.weights, e.configs])
+    ).sort((a, b) => Number(b.robustScore) - Number(a.robustScore)).slice(0, 10);
+  }
+  const mergedCount = Object.values(mergedByYear).reduce((s, a) => s + a.length, 0);
+
+  const staticHtml = buildStaticHtml(mergedByYear);
+  const outPath = path.resolve(process.cwd(), "index.html");
+  fs.writeFileSync(outPath, staticHtml, "utf8");
+
+  const { execSync } = require("child_process");
+  const cwd = process.cwd();
+  let pushed = false;
+  try {
+    execSync("git add index.html", { cwd });
+    execSync("git diff --cached --quiet index.html", { cwd });
+  } catch (_) {
+    const msg = `更新排行榜 ${new Date().toISOString().slice(0, 16)}`;
+    execSync(`git commit -m "${msg}"`, { cwd });
+    try {
+      execSync("git push", { cwd, timeout: 30000 });
+      pushed = true;
+    } catch (pushErr) { /* push failed */ }
+  }
+
+  return { ok: true, file: outPath, localCount, remoteCount, mergedCount, comparison, pushed };
+}
+
+function startAutoPush(siteUrl, intervalMinutes) {
+  stopAutoPush();
+  autoPush.siteUrl = siteUrl || "";
+  autoPush.intervalMinutes = intervalMinutes;
+  autoPush.timer = setInterval(async () => {
+    if (autoPush.running) return;
+    autoPush.running = true;
+    try {
+      await doExportAndPush(autoPush.siteUrl);
+      autoPush.lastRunAt = new Date().toISOString();
+      autoPush.lastError = null;
+    } catch (err) {
+      autoPush.lastRunAt = new Date().toISOString();
+      autoPush.lastError = err.message;
+    } finally {
+      autoPush.running = false;
+    }
+  }, intervalMinutes * 60 * 1000);
+  console.log(`[AutoPush] started, every ${intervalMinutes} min`);
+}
+
+function stopAutoPush() {
+  if (autoPush.timer) clearInterval(autoPush.timer);
+  autoPush.timer = null;
+  autoPush.intervalMinutes = 0;
+}
+
 // --- HTTP server ---
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -524,101 +630,34 @@ const server = http.createServer(async (req, res) => {
       if (req.method === "POST" && pathname === "/api/admin/export-static") {
         const body = await readJson(req);
         const siteUrl = body && body.siteUrl ? String(body.siteUrl).trim().replace(/\/$/, "") : "";
+        const result = await doExportAndPush(siteUrl);
+        json(res, 200, result);
+        return;
+      }
 
-        // Collect local data
-        const localByYear = {};
-        for (let y = 1; y <= 10; y++) {
-          localByYear[y] = Array.isArray(robustRunner.topByYear[y]) ? robustRunner.topByYear[y] : [];
-        }
-        const localCount = Object.values(localByYear).reduce((s, a) => s + a.length, 0);
+      if (req.method === "POST" && pathname === "/api/admin/auto-push/start") {
+        const body = await readJson(req);
+        const siteUrl = body && body.siteUrl ? String(body.siteUrl).trim().replace(/\/$/, "") : "";
+        const interval = Number(body && body.intervalMinutes) || 60;
+        startAutoPush(siteUrl, interval);
+        json(res, 200, { ok: true, intervalMinutes: interval, siteUrl });
+        return;
+      }
 
-        // Fetch remote data by parsing ALL_DATA from the live index.html
-        let remoteByYear = {};
-        let remoteCount = 0;
-        let comparison = [];
-        if (siteUrl) {
-          try {
-            const html = await new Promise((resolve, reject) => {
-              const mod = siteUrl.startsWith("https") ? https : http;
-              mod.get(siteUrl, (resp) => {
-                if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
-                  mod.get(resp.headers.location, (r2) => {
-                    const c = []; r2.on("data", d => c.push(d)); r2.on("end", () => resolve(Buffer.concat(c).toString("utf8")));
-                  }).on("error", reject);
-                  return;
-                }
-                const c = []; resp.on("data", d => c.push(d)); resp.on("end", () => resolve(Buffer.concat(c).toString("utf8")));
-              }).on("error", reject);
-            });
-            const m = html.match(/const\s+ALL_DATA\s*=\s*(\{[\s\S]*?\});/);
-            if (m) {
-              const parsed = JSON.parse(m[1]);
-              for (let y = 1; y <= 10; y++) {
-                remoteByYear[y] = Array.isArray(parsed[y]) ? parsed[y] : [];
-              }
-              remoteCount = Object.values(remoteByYear).reduce((s, a) => s + a.length, 0);
-            }
-            for (let y = 1; y <= 10; y++) {
-              const lb = localByYear[y] && localByYear[y][0] ? localByYear[y][0].robustScore : null;
-              const rb = remoteByYear[y] && remoteByYear[y][0] ? remoteByYear[y][0].robustScore : null;
-              comparison.push({
-                year: y,
-                localBest: lb !== null ? Number(Number(lb).toFixed(4)) : null,
-                remoteBest: rb !== null ? Number(Number(rb).toFixed(4)) : null,
-                localCount: (localByYear[y] || []).length,
-                remoteCount: (remoteByYear[y] || []).length,
-                winner: lb === null && rb === null ? "none" : lb === null ? "remote" : rb === null ? "local" : lb >= rb ? "local" : "remote",
-              });
-            }
-          } catch (err) {
-            json(res, 500, { error: `拉取线上数据失败: ${err.message}` });
-            return;
-          }
-        }
+      if (req.method === "POST" && pathname === "/api/admin/auto-push/stop") {
+        stopAutoPush();
+        json(res, 200, { ok: true });
+        return;
+      }
 
-        // Merge: keep best per year
-        const mergedByYear = {};
-        for (let y = 1; y <= 10; y++) {
-          mergedByYear[y] = dedupeEntries(
-            [...(localByYear[y] || []), ...(remoteByYear[y] || [])],
-            (e) => JSON.stringify([e.robustScore, e.avgScore, e.minScore, e.maxScore, e.stdDev, e.weights, e.configs])
-          ).sort((a, b) => Number(b.robustScore) - Number(a.robustScore)).slice(0, 10);
-        }
-        const mergedCount = Object.values(mergedByYear).reduce((s, a) => s + a.length, 0);
-
-        // Generate static HTML
-        const staticHtml = buildStaticHtml(mergedByYear);
-        const outPath = path.resolve(process.cwd(), "index.html");
-        fs.writeFileSync(outPath, staticHtml, "utf8");
-
-        // Git commit & push
-        const { execSync } = require("child_process");
-        const cwd = process.cwd();
-        let pushed = false;
-        try {
-          execSync("git add index.html", { cwd });
-          execSync('git diff --cached --quiet index.html', { cwd });
-          // No changes — skip commit
-        } catch (_) {
-          // There are changes to commit
-          const msg = `更新排行榜 ${new Date().toISOString().slice(0, 16)}`;
-          execSync(`git commit -m "${msg}"`, { cwd });
-          try {
-            execSync("git push", { cwd, timeout: 30000 });
-            pushed = true;
-          } catch (pushErr) {
-            // push failed (no remote, auth, etc.)
-          }
-        }
-
+      if (req.method === "GET" && pathname === "/api/admin/auto-push/status") {
         json(res, 200, {
-          ok: true,
-          file: outPath,
-          localCount,
-          remoteCount,
-          mergedCount,
-          comparison,
-          pushed,
+          active: !!autoPush.timer,
+          intervalMinutes: autoPush.intervalMinutes,
+          siteUrl: autoPush.siteUrl,
+          lastRunAt: autoPush.lastRunAt,
+          lastError: autoPush.lastError,
+          running: autoPush.running,
         });
         return;
       }
