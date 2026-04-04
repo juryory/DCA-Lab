@@ -119,9 +119,9 @@
           <div class="grid">
             <div class="field"><label>开始年份</label><input id="rStartYear" type="number" value="2019"></div>
             <div class="field"><label>结束年份</label><input id="rEndYear" type="number" value="2021"></div>
-            <div class="field"><label>每轮抽样数量</label><input id="rBatch" type="number" value="100"></div>
+            <div class="field"><label>每轮抽样数量</label><input id="rBatch" type="number" value="500"></div>
             <div class="field"><label>保留前几名</label><input id="rTop" type="number" value="50"></div>
-            <div class="field"><label>交易惩罚权重</label><input id="rPenalty" type="number" value="0.08" step="0.01"></div>
+            <div class="field"><label>交易惩罚权重</label><input id="rPenalty" type="number" value="0.01" step="0.01"></div>
           </div>
           <div class="actions"><button class="primary" id="startRandom">确认并开始任务</button><button class="danger" id="stopRandom">停止全部任务</button></div>
           <div class="status" id="randomStatus">请输入时间范围并启动任务。</div>
@@ -340,7 +340,7 @@
 
     function loop(){
       if(!S.running)return;
-      const batch=+rBatch.value||100,limit=+rTop.value||50,w=+rPenalty.value||0.08;
+      const batch=+rBatch.value||500,limit=+rTop.value||50,w=+rPenalty.value||0.01;
       for(let i=0;i<batch;i++){S.attempts++;const cfg=buildRandomConfig(),key=JSON.stringify(cfg);if(S.seen.has(key))continue;S.seen.add(key);try{const res=runBacktest(S.randomBars,cfg);S.valid++;S.top.push({cfg,res,score:score(res,w)});S.top.sort((a,b)=>b.score-a.score);S.top=S.top.slice(0,limit);}catch(e){}}
       renderRandom();
       randomStatus.textContent=`搜索中：已抽样 ${S.attempts} 次，得到 ${S.valid} 组有效结果。`;
@@ -463,9 +463,9 @@ localStorage.removeItem("ausub_admin_token");
               csvPath: "au9999_history.csv",
               startYear: Number(rStartYear.value),
               endYear: Number(rEndYear.value),
-              batch: Number(rBatch.value) || 100,
+              batch: Number(rBatch.value) || 500,
               top: Number(rTop.value) || 50,
-              penalty: Number(rPenalty.value) || 0.08
+              penalty: Number(rPenalty.value) || 0.01
             });
             randomStatus.textContent = `已创建任务：${rStartYear.value}-${rEndYear.value}`;
             startPolling();

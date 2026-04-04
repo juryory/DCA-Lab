@@ -83,27 +83,39 @@ function barsFromCsvText(text) {
   return Array.from(map.values()).sort((a, b) => a.tradeDate.localeCompare(b.tradeDate));
 }
 
-function sma(arr, w) {
-  return arr.slice(-w).reduce((s, v) => s + v, 0) / w;
+// Index-based helpers: operate directly on array indices, zero allocations
+function smaAt(arr, end, w) {
+  let sum = 0;
+  for (let i = end - w + 1; i <= end; i++) sum += arr[i];
+  return sum / w;
 }
 
-function std(arr, w) {
-  const s = arr.slice(-w);
-  const a = sma(arr, w);
-  return Math.sqrt(s.reduce((x, v) => x + (v - a) ** 2, 0) / w);
+function stdAt(arr, end, w) {
+  const mean = smaAt(arr, end, w);
+  let sum = 0;
+  for (let i = end - w + 1; i <= end; i++) sum += (arr[i] - mean) ** 2;
+  return Math.sqrt(sum / w);
 }
 
-function rsi(arr, p = 14) {
-  const deltas = [];
-  for (let i = 1; i < arr.length; i += 1) deltas.push(arr[i] - arr[i - 1]);
-  const recent = deltas.slice(-p);
-  const gains = recent.map((v) => Math.max(v, 0));
-  const losses = recent.map((v) => Math.abs(Math.min(v, 0)));
-  const avgGain = gains.reduce((s, v) => s + v, 0) / gains.length;
-  const avgLoss = losses.reduce((s, v) => s + v, 0) / losses.length;
+function rsiAt(arr, end, p) {
+  let sumGain = 0, sumLoss = 0;
+  for (let i = end - p + 1; i <= end; i++) {
+    const delta = arr[i] - arr[i - 1];
+    if (delta > 0) sumGain += delta;
+    else sumLoss -= delta;
+  }
+  const avgGain = sumGain / p;
+  const avgLoss = sumLoss / p;
   if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - 100 / (1 + rs);
+  return 100 - 100 / (1 + avgGain / avgLoss);
+}
+
+function maxAt(arr, end, w) {
+  let m = -Infinity;
+  for (let i = end - w + 1; i <= end; i++) {
+    if (arr[i] > m) m = arr[i];
+  }
+  return m;
 }
 
 function weekday(ymd) {
@@ -114,35 +126,38 @@ function weekday(ymd) {
   return js === 0 ? 7 : js;
 }
 
-function classify(closes, cfg) {
-  if (closes.length < 60) return ["neutral", cfg.neutralMultiplier];
-
-  const last = closes.at(-1);
-  const ma20 = sma(closes, 20);
-  const ma60 = sma(closes, 60);
-  const rv = rsi(closes, 14);
-  const hi = Math.max(...closes.slice(-60));
-  const dd = hi > 0 ? (hi - last) / hi : 0;
+// Accepts pre-computed indicator values to avoid redundant calculations
+function classify(last, ma20, ma60, rv, hi60, cfg) {
+  const dd = hi60 > 0 ? (hi60 - last) / hi60 : 0;
   const v20 = (last - ma20) / ma20;
   const v60 = (last - ma60) / ma60;
 
-  if ([v20 <= cfg.discountToMa20, rv <= cfg.oversoldRsi, dd >= cfg.deepDrawdown, v60 < 0].filter(Boolean).length >= 2) {
-    return ["oversold", cfg.oversoldMultiplier];
-  }
+  let cnt = 0;
+  if (v20 <= cfg.discountToMa20) cnt++;
+  if (rv <= cfg.oversoldRsi) cnt++;
+  if (dd >= cfg.deepDrawdown) cnt++;
+  if (v60 < 0) cnt++;
+  if (cnt >= 2) return ["oversold", cfg.oversoldMultiplier];
 
-  if ([v20 >= cfg.premiumToMa20, rv >= cfg.hotRsi, v60 > 0, dd < cfg.drawdownWeak].filter(Boolean).length >= 2) {
-    return ["hot", cfg.hotMultiplier];
-  }
+  cnt = 0;
+  if (v20 >= cfg.premiumToMa20) cnt++;
+  if (rv >= cfg.hotRsi) cnt++;
+  if (v60 > 0) cnt++;
+  if (dd < cfg.drawdownWeak) cnt++;
+  if (cnt >= 2) return ["hot", cfg.hotMultiplier];
 
-  if ([v20 < 0, rv >= cfg.oversoldRsi && rv <= cfg.weakRsiMax, dd >= cfg.drawdownWeak && dd < cfg.deepDrawdown].filter(Boolean).length >= 2) {
-    return ["weak", cfg.weakMultiplier];
-  }
+  cnt = 0;
+  if (v20 < 0) cnt++;
+  if (rv >= cfg.oversoldRsi && rv <= cfg.weakRsiMax) cnt++;
+  if (dd >= cfg.drawdownWeak && dd < cfg.deepDrawdown) cnt++;
+  if (cnt >= 2) return ["weak", cfg.weakMultiplier];
 
   return ["neutral", cfg.neutralMultiplier];
 }
 
-function runBacktest(bars, cfg) {
-  if (bars.length < Math.max(cfg.maWindow, 60) + 2) {
+function runBacktest(bars, cfg, { recordTrades = true } = {}) {
+  const minBars = Math.max(cfg.maWindow, 60);
+  if (bars.length < minBars + 2) {
     throw new Error("Not enough bar data");
   }
 
@@ -151,39 +166,46 @@ function runBacktest(bars, cfg) {
   let cash = 0;
   let prevBelow = false;
   let addon = false;
+  let tradeCount = 0;
   const pending = [];
   const closes = [];
-  const trades = [];
+  const trades = recordTrades ? [] : null;
 
   for (let i = 0; i < bars.length; i += 1) {
     const b = bars[i];
 
     if (pending.length) {
       const todays = pending.splice(0);
-      todays.forEach((o) => {
+      for (let j = 0; j < todays.length; j++) {
+        const o = todays[j];
         if (o.type === "buy") {
           const u = o.amount / b.close;
           units += u;
           invested += o.amount;
-          trades.push({ d: b.tradeDate, p: b.close, a: o.amount, u, t: "BUY", r: o.reason });
+          tradeCount++;
+          if (trades) trades.push({ d: b.tradeDate, p: b.close, a: o.amount, u, t: "BUY", r: o.reason });
         } else if (units > 0) {
-          const su = Math.min(units, units * o.pct);
+          const su = units * o.pct;
           const sa = su * b.close;
           units -= su;
           cash += sa;
-          trades.push({ d: b.tradeDate, p: b.close, a: sa, u: su, t: "SELL", r: o.reason });
+          tradeCount++;
+          if (trades) trades.push({ d: b.tradeDate, p: b.close, a: sa, u: su, t: "SELL", r: o.reason });
         }
-      });
+      }
     }
 
     closes.push(b.close);
-    if (closes.length < Math.max(cfg.maWindow, 60)) continue;
+    if (closes.length < minBars) continue;
 
-    const ma = sma(closes, cfg.maWindow);
-    const ma20 = sma(closes, 20);
-    const bollUp = ma20 + 2 * std(closes, 20);
-    const rv = rsi(closes, 14);
-    const [state, mult] = classify(closes, cfg);
+    const ci = closes.length - 1;
+    const ma = smaAt(closes, ci, cfg.maWindow);
+    const ma20 = smaAt(closes, ci, 20);
+    const bollUp = ma20 + 2 * stdAt(closes, ci, 20);
+    const rv = rsiAt(closes, ci, 14);
+    const ma60 = smaAt(closes, ci, 60);
+    const hi60 = maxAt(closes, ci, 60);
+    const [state, mult] = classify(b.close, ma20, ma60, rv, hi60, cfg);
 
     const intraday = cfg.buyMode === "intraday_break_same_close";
     const belowClose = b.close < ma;
@@ -197,12 +219,14 @@ function runBacktest(bars, cfg) {
       : i >= cfg.maWindow && (i - cfg.maWindow) % cfg.scheduleDays === 0;
 
     if (scheduled) {
-      const amount = cfg.dynamicEnabled ? cfg.baseAmount * mult : cfg.baseAmount;
+      const rawAmount = cfg.dynamicEnabled ? cfg.baseAmount * mult : cfg.baseAmount;
+      const amount = Math.max(100, Math.round(rawAmount / 100) * 100);
       if (intraday) {
         const u = amount / b.close;
         units += u;
         invested += amount;
-        trades.push({ d: b.tradeDate, p: b.close, a: amount, u, t: "BUY", r: `SCHEDULED(${state})` });
+        tradeCount++;
+        if (trades) trades.push({ d: b.tradeDate, p: b.close, a: amount, u, t: "BUY", r: `SCHEDULED(${state})` });
       } else if (hasNext) {
         pending.push({ type: "buy", amount, reason: `SCHEDULED_NEXT(${state})` });
       }
@@ -216,7 +240,8 @@ function runBacktest(bars, cfg) {
         const u = cfg.dipAmount / b.close;
         units += u;
         invested += cfg.dipAmount;
-        trades.push({ d: b.tradeDate, p: b.close, a: cfg.dipAmount, u, t: "BUY", r: firstBreak ? "BREAK_ADD" : "FOLLOW_ADD" });
+        tradeCount++;
+        if (trades) trades.push({ d: b.tradeDate, p: b.close, a: cfg.dipAmount, u, t: "BUY", r: firstBreak ? "BREAK_ADD" : "FOLLOW_ADD" });
       } else if (hasNext) {
         pending.push({ type: "buy", amount: cfg.dipAmount, reason: firstBreak ? "BREAK_ADD_NEXT" : "FOLLOW_ADD_NEXT" });
       }
@@ -244,8 +269,8 @@ function runBacktest(bars, cfg) {
     finalValue: fv,
     returnRate: invested > 0 ? (fv - invested) / invested : 0,
     averageCost: units > 0 ? (invested - cash) / units : 0,
-    tradeCount: trades.length,
-    trades,
+    tradeCount,
+    trades: trades || [],
   };
 }
 
@@ -289,7 +314,7 @@ function randFloatStep(range, step = 0.1) {
 
 const DEFAULT_RANGES = {
   baseAmount: { min: 300, max: 1000 },
-  dipAmount: { min: 50, max: 200 },
+  dipAmount: { min: 100, max: 200 },
   scheduleMode: ["every_n_days", "weekly_weekday"],
   scheduleDays: { min: 1, max: 30 },
   scheduleWeekday: [1, 2, 3, 4, 5],
@@ -454,13 +479,20 @@ function randomWeights() {
 }
 
 /**
- * Build a random portfolio config: weights + per-asset strategy params.
+ * Build a random portfolio config: weights + shared strategy with per-asset amounts.
+ * baseAmount/dipAmount are independent per asset; all other params are shared.
  */
 function buildRandomPortfolioConfig(customRanges = null) {
   const weights = randomWeights();
+  const sharedCfg = buildRandomConfig(customRanges);
+  const ranges = normalizeRanges(customRanges || {});
   const configs = {};
   for (const key of ASSET_KEYS) {
-    configs[key] = buildRandomConfig(customRanges);
+    configs[key] = {
+      ...sharedCfg,
+      baseAmount: randIntStep(ranges.baseAmount, 100),
+      dipAmount: randIntStep(ranges.dipAmount, 100),
+    };
   }
   return { weights, configs };
 }
@@ -479,16 +511,18 @@ function runPortfolioBacktest(barsMap, portfolioCfg, totalBase = 1000) {
   let totalFinalValue = 0;
   let totalTrades = 0;
   const assetDetails = [];
+  const actualConfigs = {};
 
   for (const key of ASSET_KEYS) {
     const bars = barsMap[key];
     const cfg = { ...configs[key] };
-    // Scale base/dip amounts by weight
     const w = weights[key] || 0;
-    cfg.baseAmount = Math.round(totalBase * w);
-    cfg.dipAmount = Math.round((cfg.dipAmount / (cfg.baseAmount || 100)) * cfg.baseAmount) || Math.round(totalBase * w * 0.3);
-    if (cfg.baseAmount < 10) cfg.baseAmount = 10;
-    if (cfg.dipAmount < 10) cfg.dipAmount = 10;
+    // baseAmount scaled by weight; dipAmount per-asset; both rounded to 100
+    cfg.baseAmount = Math.round(totalBase * w / 100) * 100;
+    cfg.dipAmount = Math.round(cfg.dipAmount / 100) * 100;
+    if (cfg.baseAmount < 100) cfg.baseAmount = 100;
+    if (cfg.dipAmount < 100) cfg.dipAmount = 100;
+    actualConfigs[key] = cfg;
 
     if (!bars || bars.length < Math.max(cfg.maWindow, 60) + 2) {
       assetDetails.push({ asset: key, label: ASSET_LABELS[key], weight: w, skipped: true, reason: "数据不足" });
@@ -496,7 +530,7 @@ function runPortfolioBacktest(barsMap, portfolioCfg, totalBase = 1000) {
     }
 
     try {
-      const res = runBacktest(bars, cfg);
+      const res = runBacktest(bars, cfg, { recordTrades: false });
       results[key] = res;
       totalInvested += res.totalInvested;
       totalFinalValue += res.finalValue;
@@ -520,7 +554,7 @@ function runPortfolioBacktest(barsMap, portfolioCfg, totalBase = 1000) {
     returnRate,
     tradeCount: totalTrades,
     assetDetails,
-    configs,
+    configs: actualConfigs,
   };
 }
 
@@ -579,6 +613,9 @@ function mutateConfig(cfg, mutationRate = 0.15, mutationStrength = 0.2) {
       out[k] = sampleFrom(DEFAULT_RANGES[k]);
     }
   }
+  // Enforce 100-step rounding for amount fields
+  if (out.baseAmount !== undefined) out.baseAmount = Math.round(out.baseAmount / 100) * 100;
+  if (out.dipAmount !== undefined) out.dipAmount = Math.round(out.dipAmount / 100) * 100;
   // Enforce ordering constraints
   if (out.weakRsiMax <= out.oversoldRsi) out.weakRsiMax = out.oversoldRsi + 1;
   if (out.hotRsi <= out.weakRsiMax) out.hotRsi = out.weakRsiMax + 1;
@@ -625,13 +662,34 @@ function mutateWeights(weights, mutationRate = 0.3, mutationStrength = 0.1) {
 
 /**
  * Breed a new portfolio config from two parents via crossover + mutation.
+ * Strategy params are shared (crossover from first asset); amounts are per-asset.
  */
 function breedPortfolioConfig(parentA, parentB) {
   const weights = mutateWeights(crossoverWeights(parentA.weights, parentB.weights));
+  // Shared strategy crossover from first asset's config
+  const parentACfg = parentA.configs[ASSET_KEYS[0]];
+  const parentBCfg = parentB.configs[ASSET_KEYS[0]];
+  const sharedChild = mutateConfig(crossoverConfig(parentACfg, parentBCfg));
   const configs = {};
   for (const k of ASSET_KEYS) {
-    const child = crossoverConfig(parentA.configs[k], parentB.configs[k]);
-    configs[k] = mutateConfig(child);
+    // Per-asset amounts: crossover + mutation independently
+    let ba = Math.random() < 0.5 ? parentA.configs[k].baseAmount : parentB.configs[k].baseAmount;
+    let da = Math.random() < 0.5 ? parentA.configs[k].dipAmount : parentB.configs[k].dipAmount;
+    if (Math.random() < 0.15) {
+      const r = DEFAULT_RANGES.baseAmount;
+      ba += (Math.random() * 2 - 1) * 0.2 * (r.max - r.min);
+      ba = Math.max(r.min, Math.min(r.max, ba));
+    }
+    if (Math.random() < 0.15) {
+      const r = DEFAULT_RANGES.dipAmount;
+      da += (Math.random() * 2 - 1) * 0.2 * (r.max - r.min);
+      da = Math.max(r.min, Math.min(r.max, da));
+    }
+    configs[k] = {
+      ...sharedChild,
+      baseAmount: Math.round(ba / 100) * 100,
+      dipAmount: Math.round(da / 100) * 100,
+    };
   }
   return { weights, configs };
 }

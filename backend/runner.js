@@ -65,8 +65,8 @@ class RandomRunner {
     this.attempts = 0;
     this.valid = 0;
     this.skipped = 0;
-    this.batch = 100;
-    this.penalty = 0.08;
+    this.batch = 500;
+    this.penalty = 0.01;
     this.topLimit = 10;
     this.workerCount = configuredWorkerCount("RANGE_WORKERS", 4);
 
@@ -407,10 +407,10 @@ class RobustSearchRunner {
     this.attempts = 0;
     this.valid = 0;
     this.skipped = 0;
-    this.batch = 50;
-    this.penalty = 0.08;
+    this.batch = 200;
+    this.penalty = 0.01;
     this.topLimit = 10;
-    this.windowCount = 10;
+    this.windowCount = 15;
     this.workerCount = configuredWorkerCount("ROBUST_WORKERS", 4);
 
     this.storePath = path.resolve(runner.dataDir, "robust_store.json");

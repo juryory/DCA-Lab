@@ -38,18 +38,6 @@ const robustRunner = new RobustSearchRunner(runner);
 const tasks = new Map();
 let taskIdCounter = 0;
 const taskWorkers = new Map();
-const uploadIntervals = new Set([10, 20, 30, 60]);
-const cloudSync = {
-  enabled: false,
-  apiUrl: "",
-  adminToken: "",
-  intervalMinutes: 30,
-  timer: null,
-  lastRunAt: null,
-  lastResult: null,
-  running: false,
-};
-
 function envInt(name) {
   const raw = process.env[name];
   if (raw === undefined || raw === null || raw === "") return null;
@@ -125,52 +113,6 @@ function text(res, status, payload, type = "text/plain; charset=utf-8") {
     "Content-Length": Buffer.byteLength(payload),
   });
   res.end(payload);
-}
-
-function postJson(targetUrl, payload) {
-  return requestJson(targetUrl, { method: "POST", body: payload });
-}
-
-function requestJson(targetUrl, options = {}) {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(targetUrl);
-    const mod = parsed.protocol === "https:" ? https : http;
-    const method = options.method || "GET";
-    const body = options.body === undefined ? null : JSON.stringify(options.body);
-    const headers = { ...(options.headers || {}) };
-    if (body !== null) {
-      headers["Content-Type"] = headers["Content-Type"] || "application/json";
-      headers["Content-Length"] = Buffer.byteLength(body);
-    }
-    const req = mod.request({
-      hostname: parsed.hostname,
-      port: parsed.port,
-      path: parsed.pathname + parsed.search,
-      method,
-      headers,
-    }, (resp) => {
-      const chunks = [];
-      resp.on("data", (c) => chunks.push(c));
-      resp.on("end", () => {
-        const raw = Buffer.concat(chunks).toString("utf8");
-        let parsedBody = null;
-        try {
-          parsedBody = raw ? JSON.parse(raw) : null;
-        } catch (_) {
-          parsedBody = raw ? { raw } : null;
-        }
-        if (resp.statusCode >= 200 && resp.statusCode < 300) {
-          resolve(parsedBody);
-          return;
-        }
-        const msg = parsedBody && parsedBody.error ? parsedBody.error : `HTTP ${resp.statusCode}`;
-        reject(new Error(msg));
-      });
-    });
-    req.on("error", reject);
-    if (body !== null) req.write(body);
-    req.end();
-  });
 }
 
 function readJson(req) {
@@ -370,147 +312,130 @@ function dedupeEntries(entries, keyFn) {
   return out;
 }
 
-function collectRangeEntries() {
-  const merged = [];
-  for (const entries of Object.values(runner.store.ranges || {})) {
-    if (Array.isArray(entries)) merged.push(...entries);
-  }
-  return dedupeEntries(merged, (entry) => JSON.stringify([
-    entry.rangeKey,
-    entry.score,
-    entry.returnRate,
-    entry.tradeCount,
-    entry.weights,
-    entry.configs,
-  ]));
-}
 
-function collectRobustEntries() {
-  const merged = [];
-  for (const entries of Object.values(robustRunner.topByYear || {})) {
-    if (Array.isArray(entries)) merged.push(...entries);
-  }
-  return dedupeEntries(merged, (entry) => JSON.stringify([
-    entry.windowYears,
-    entry.robustScore,
-    entry.avgScore,
-    entry.minScore,
-    entry.maxScore,
-    entry.stdDev,
-    entry.windows,
-    entry.weights,
-    entry.configs,
-  ]));
-}
 
-async function uploadToCloudflare(apiUrl, adminTokenValue) {
-  const cleanApiUrl = String(apiUrl || "").trim().replace(/\/$/, "");
-  if (!cleanApiUrl) throw new Error("missing apiUrl");
-  const adminToken = String(adminTokenValue || "").trim();
-  if (!adminToken) throw new Error("missing adminToken");
+// --- Static page generator ---
+function buildStaticHtml(dataByYear) {
+  const dataJson = JSON.stringify(dataByYear);
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DCALab 稳健排行榜</title>
+  <style>
+    :root{--bg:#f6f1e7;--panel:#fffdf8;--line:#dfd3c0;--text:#30271b;--muted:#6f6554;--gold:#9a6818;--gold2:#c58b2a;--good:#1f6b3c;--bad:#973939;--soft:#f8f0df}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif}
+    .wrap{max-width:1400px;margin:0 auto;padding:24px}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:12px}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .meta{font-size:12px;color:var(--muted)}
+    .tabs{display:flex;gap:6px;margin:12px 0}
+    .tab{padding:8px 16px;border:1px solid var(--line);border-radius:999px;cursor:pointer;background:#fff;font-size:13px}
+    .tab.active{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#fff;border-color:transparent}
+    .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+    .card{padding:12px;border:1px solid var(--line);border-radius:14px;background:#fff}
+    .k{font-size:12px;color:var(--muted)}.v{font-size:20px;font-weight:700}
+    .good{color:var(--good)}.bad{color:var(--bad)}
+    .layout{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .layout>.panel{margin-bottom:0}
+    .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:14px;background:#fff;max-height:420px}
+    .detail-col .detail{overflow:auto;max-height:420px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{border-bottom:1px solid #eee4d3;padding:8px 6px;text-align:left}
+    th{position:sticky;top:0;background:#fff;color:var(--muted)}
+    tbody tr{cursor:pointer}
+    tbody tr.selected{background:var(--soft)}
+    .detail{border:1px solid var(--line);border-radius:12px;padding:14px;background:#fff}
+    .detail-empty{color:var(--muted);padding:8px 0}
+    .asset-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+    .asset-card{border:1px solid var(--line);border-radius:14px;padding:12px;background:#fffdfa}
+    .asset-card.full-row{grid-column:1/-1}
+    .asset-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}
+    .asset-name{font-weight:700}
+    .asset-points{display:grid;gap:6px}
+    .point{font-size:13px;color:var(--text)}
+    .point strong{color:var(--muted);font-weight:600}
+    .mini-table{width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+    .mini-table th,.mini-table td{padding:8px 6px;border-bottom:1px solid #eee4d3;text-align:left}
+    .mini-table th{background:#fcf7ef;color:var(--muted);position:static}
+    .mini-wrap{overflow:auto;border-radius:12px}
+    @media(max-width:1100px){.asset-grid{grid-template-columns:1fr}}
+    @media(max-width:1000px){.cards{grid-template-columns:repeat(3,1fr)}.layout{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <div class="row"><h2 style="margin:0">DCALab 稳健排行榜</h2></div>
+      <div class="meta" style="margin-top:6px">按滚动年份窗口表现，筛选最稳健的多资产定投策略。</div>
+    </div>
+    <div class="tabs" id="yearTabs"></div>
+    <div class="cards">
+      <div class="card"><div class="k">最佳稳健分</div><div class="v" id="vBestRobust">-</div></div>
+      <div class="card"><div class="k">最佳平均分</div><div class="v" id="vBestAvg">-</div></div>
+      <div class="card"><div class="k">最佳最低分</div><div class="v" id="vBestMin">-</div></div>
+      <div class="card"><div class="k">结果数量</div><div class="v" id="vCount">-</div></div>
+      <div class="card"><div class="k">当前窗口</div><div class="v" id="vYear">1Y</div></div>
+    </div>
+    <div class="layout">
+      <div class="panel" style="padding:0"><div class="table-wrap">
+        <table><thead><tr>
+          <th>#</th><th>稳健分</th><th>平均分</th><th>最低分</th><th>最高分</th><th>标准差</th><th>窗口数</th><th>黄金</th><th>沪深300</th><th>标普500</th>
+        </tr></thead><tbody id="rows"></tbody></table>
+      </div></div>
+      <div class="detail-col"><div class="detail">
+        <div class="k" style="margin-bottom:8px">各窗口回测结果</div>
+        <div id="detail" class="detail-empty">点击任意一行查看窗口回测结果。</div>
+      </div></div>
+    </div>
+    <div class="panel">
+      <div class="k" style="margin-bottom:8px">3个资产策略参数</div>
+      <div id="strategyParams" class="detail-empty">点击任意一行查看详细策略参数。</div>
+    </div>
+  </div>
+  <script>
+    const ALL_DATA = ${dataJson};
+    let selectedYear = 1, selectedIdx = 0, entries = [];
 
-  const localByYear = {};
-  for (let y = 1; y <= 10; y++) {
-    localByYear[y] = Array.isArray(robustRunner.topByYear[y]) ? robustRunner.topByYear[y] : [];
-  }
-  const remoteSummary = await requestJson(`${cleanApiUrl}/api/robust`);
-  const remoteByYear = {};
-  for (let y = 1; y <= 10; y++) {
-    const count = remoteSummary && remoteSummary.summary && remoteSummary.summary[y] ? remoteSummary.summary[y].count : 0;
-    if (!count) {
-      remoteByYear[y] = [];
-      continue;
+    function n(v,d=2){const num=Number(v);return Number.isFinite(num)?num.toFixed(d):"-"}
+    function pct(v){return n((Number(v)||0)*100,0)+"%"}
+    function pctScore(v){const num=Number(v);return Number.isFinite(num)?(num*100).toFixed(2)+"%":"-"}
+    function money(v){const num=Number(v);return Number.isFinite(num)?num.toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2}):"-"}
+    function esc(v){return String(v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+
+    function formatSchedule(c){if(!c)return"-";if(c.scheduleMode==="every_n_days")return"每 "+(c.scheduleDays??"-")+" 天一次";if(c.scheduleMode==="weekly_weekday")return"每周 "+["一","二","三","四","五","六","日"][Number(c.scheduleWeekday)-1]||"-";return c.scheduleMode||"-"}
+    function formatScheduleMode(m){return{every_n_days:"按固定天数定投",weekly:"按周定投",weekly_weekday:"按周几定投",monthly:"按月定投"}[m]||m||"-"}
+    function formatBuyMode(m){return{close_confirm_next_close:"收盘确认，下一交易日收盘买入",intraday_break_same_close:"盘中触发，当天收盘买入"}[m]||m||"-"}
+    function formatWeekday(w){const l=["一","二","三","四","五","六","日"][Number(w)-1];return l?"周"+l:"-"}
+
+    function renderTabs(){yearTabs.innerHTML="";for(let y=1;y<=10;y++){const t=document.createElement("div");t.className="tab"+(y===selectedYear?" active":"");t.textContent=y+"Y";t.onclick=()=>{selectedYear=y;selectedIdx=0;renderTabs();render()};yearTabs.appendChild(t)}}
+
+    function renderAmountCard(key,label,entry){const c=(entry.configs||{})[key];if(!c)return"";return'<div class="asset-card"><div class="asset-head"><div class="asset-name">'+esc(label)+'</div></div><div class="asset-points"><div class="point"><strong>基础定投</strong> '+esc(c.baseAmount)+'</div><div class="point"><strong>回撤加仓</strong> '+esc(c.dipAmount)+'</div></div></div>'}
+    function renderStrategyCard(entry){const c=(entry.configs||{}).au9999||(entry.configs||{}).csi300||(entry.configs||{}).sp500;if(!c)return"";const sd=c.scheduleMode==="every_n_days",sw=c.scheduleMode==="weekly"||c.scheduleMode==="weekly_weekday";return'<div class="asset-card full-row"><div class="asset-head"><div class="asset-name">策略参数（三资产共享）</div></div><div class="asset-points" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))"><div class="point"><strong>均线窗口</strong> '+esc(c.maWindow)+' 日</div><div class="point"><strong>定投频率</strong> '+esc(formatSchedule(c))+'</div><div class="point"><strong>频率模式</strong> '+esc(formatScheduleMode(c.scheduleMode))+'</div>'+(sd?'<div class="point"><strong>间隔天数</strong> '+esc(c.scheduleDays??"-")+'</div>':"")+(sw?'<div class="point"><strong>星期设置</strong> '+esc(formatWeekday(c.scheduleWeekday))+'</div>':'')+'<div class="point"><strong>买入方式</strong> '+esc(formatBuyMode(c.buyMode))+'</div></div></div>'}
+
+    function render(){
+      entries=ALL_DATA[selectedYear]||[];
+      vYear.textContent=selectedYear+"Y";
+      vCount.textContent=entries.length;
+      const best=entries[0];
+      vBestRobust.textContent=best?n(best.robustScore):"-";
+      vBestAvg.textContent=best?n(best.avgScore):"-";
+      vBestMin.textContent=best?n(best.minScore):"-";
+      if(!entries.length){rows.innerHTML='<tr><td colspan="10">当前窗口暂无结果。</td></tr>';detail.innerHTML='';strategyParams.innerHTML='';return}
+      if(selectedIdx>=entries.length)selectedIdx=0;
+      rows.innerHTML=entries.map((e,i)=>{const w=e.weights||{};return'<tr data-i="'+i+'" class="'+(i===selectedIdx?"selected":"")+'"><td>'+(i+1)+'</td><td>'+n(e.robustScore)+'</td><td>'+n(e.avgScore)+'</td><td class="'+(Number(e.minScore)>=0?"good":"bad")+'">'+n(e.minScore)+'</td><td>'+n(e.maxScore)+'</td><td>'+n(e.stdDev)+'</td><td>'+(e.windowCount||(e.windows?e.windows.length:"-"))+'</td><td>'+pct(w.au9999||0)+'</td><td>'+pct(w.csi300||0)+'</td><td>'+pct(w.sp500||0)+'</td></tr>'}).join("");
+      const sel=entries[selectedIdx];
+      const details=Array.isArray(sel.details)?sel.details:[];
+      detail.innerHTML=details.length?'<div class="mini-wrap"><table class="mini-table"><thead><tr><th>窗口</th><th>收益率</th><th>投入</th><th>最终市值</th><th>交易数</th></tr></thead><tbody>'+details.map(d=>'<tr><td>'+esc(d.range||"-")+'</td><td class="'+(Number(d.returnRate)>=0?"good":"bad")+'">'+pctScore(d.returnRate)+'</td><td>'+money(d.totalInvested)+'</td><td>'+money(d.finalValue)+'</td><td>'+esc(d.tradeCount??"-")+'</td></tr>').join("")+'</tbody></table></div>':'';
+      strategyParams.innerHTML='<div class="asset-grid">'+renderAmountCard("au9999","黄金 AU9999",sel)+renderAmountCard("csi300","沪深300",sel)+renderAmountCard("sp500","标普500",sel)+renderStrategyCard(sel)+'</div>';
     }
-    const detail = await requestJson(`${cleanApiUrl}/api/robust?year=${y}`);
-    remoteByYear[y] = Array.isArray(detail && detail.entries) ? detail.entries : [];
-  }
-
-  const mergedTopByYear = {};
-  let mergedCount = 0;
-  for (let y = 1; y <= 10; y++) {
-    const deduped = dedupeEntries(
-      [...(remoteByYear[y] || []), ...(localByYear[y] || [])],
-      (entry) => JSON.stringify([
-        entry.windowYears,
-        entry.robustScore,
-        entry.avgScore,
-        entry.minScore,
-        entry.maxScore,
-        entry.stdDev,
-        entry.windows,
-        entry.weights,
-        entry.configs,
-      ])
-    ).sort((a, b) => Number(b.robustScore) - Number(a.robustScore)).slice(0, 10);
-    mergedTopByYear[y] = deduped;
-    mergedCount += deduped.length;
-  }
-
-  const result = {
-    apiUrl: cleanApiUrl,
-    rangeSubmitted: 0,
-    robustSubmitted: mergedCount,
-    remoteCount: Object.values(remoteByYear).reduce((sum, arr) => sum + arr.length, 0),
-    localCount: Object.values(localByYear).reduce((sum, arr) => sum + arr.length, 0),
-    robustResponse: null,
-  };
-  result.robustResponse = await requestJson(`${cleanApiUrl}/api/admin/robust/replace`, {
-    method: "POST",
-    body: { topByYear: mergedTopByYear },
-    headers: { Authorization: `Bearer ${adminToken}` },
-  });
-
-  cloudSync.lastRunAt = new Date().toISOString();
-  cloudSync.lastResult = result;
-  return result;
-}
-
-function stopCloudSync() {
-  cloudSync.enabled = false;
-  if (cloudSync.timer) clearInterval(cloudSync.timer);
-  cloudSync.timer = null;
-}
-
-function startCloudSync(apiUrl, intervalMinutes, adminToken) {
-  const minutes = Number(intervalMinutes);
-  if (!uploadIntervals.has(minutes)) throw new Error("invalid interval");
-  const cleanApiUrl = String(apiUrl || "").trim().replace(/\/$/, "");
-  const cleanAdminToken = String(adminToken || "").trim();
-  if (!cleanApiUrl) throw new Error("missing apiUrl");
-  if (!cleanAdminToken) throw new Error("missing adminToken");
-
-  stopCloudSync();
-  cloudSync.enabled = true;
-  cloudSync.apiUrl = cleanApiUrl;
-  cloudSync.adminToken = cleanAdminToken;
-  cloudSync.intervalMinutes = minutes;
-  cloudSync.timer = setInterval(async () => {
-    if (cloudSync.running) return;
-    cloudSync.running = true;
-    try {
-      await uploadToCloudflare(cloudSync.apiUrl, cloudSync.adminToken);
-    } catch (err) {
-      cloudSync.lastRunAt = new Date().toISOString();
-      cloudSync.lastResult = { error: err.message, apiUrl: cloudSync.apiUrl };
-    } finally {
-      cloudSync.running = false;
-    }
-  }, minutes * 60 * 1000);
-}
-
-function cloudSyncStatus() {
-  return {
-    enabled: cloudSync.enabled,
-    running: cloudSync.running,
-    apiUrl: cloudSync.apiUrl,
-    hasAdminToken: Boolean(cloudSync.adminToken),
-    intervalMinutes: cloudSync.intervalMinutes,
-    lastRunAt: cloudSync.lastRunAt,
-    lastResult: cloudSync.lastResult,
-    rangeEntries: collectRangeEntries().length,
-    robustEntries: collectRobustEntries().length,
-    allowedIntervals: Array.from(uploadIntervals.values()),
-  };
+    rows.onclick=(e)=>{const tr=e.target.closest("tr[data-i]");if(!tr)return;selectedIdx=Number(tr.dataset.i);render()};
+    renderTabs();render();
+  </script>
+</body>
+</html>`;
 }
 
 // --- HTTP server ---
@@ -583,7 +508,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === "GET" && pathname === "/api/admin/status") {
-        json(res, 200, { ...runner.status(), cloudSync: cloudSyncStatus() });
+        json(res, 200, runner.status());
         return;
       }
 
@@ -610,7 +535,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === "GET" && pathname === "/api/admin/robust/status") {
-        json(res, 200, { ...robustRunner.status(), cloudSync: cloudSyncStatus() });
+        json(res, 200, robustRunner.status());
         return;
       }
 
@@ -627,23 +552,105 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      if (req.method === "POST" && pathname === "/api/admin/cloudflare/upload") {
+      if (req.method === "POST" && pathname === "/api/admin/export-static") {
         const body = await readJson(req);
-        const result = await uploadToCloudflare(body && body.apiUrl, body && body.adminToken);
-        json(res, 200, { ok: true, result, cloudSync: cloudSyncStatus() });
-        return;
-      }
+        const siteUrl = body && body.siteUrl ? String(body.siteUrl).trim().replace(/\/$/, "") : "";
 
-      if (req.method === "POST" && pathname === "/api/admin/cloudflare/auto-start") {
-        const body = await readJson(req);
-        startCloudSync(body && body.apiUrl, Number(body && body.intervalMinutes), body && body.adminToken);
-        json(res, 200, { ok: true, cloudSync: cloudSyncStatus() });
-        return;
-      }
+        // Collect local data
+        const localByYear = {};
+        for (let y = 1; y <= 10; y++) {
+          localByYear[y] = Array.isArray(robustRunner.topByYear[y]) ? robustRunner.topByYear[y] : [];
+        }
+        const localCount = Object.values(localByYear).reduce((s, a) => s + a.length, 0);
 
-      if (req.method === "POST" && pathname === "/api/admin/cloudflare/auto-stop") {
-        stopCloudSync();
-        json(res, 200, { ok: true, cloudSync: cloudSyncStatus() });
+        // Fetch remote data by parsing ALL_DATA from the live index.html
+        let remoteByYear = {};
+        let remoteCount = 0;
+        let comparison = [];
+        if (siteUrl) {
+          try {
+            const html = await new Promise((resolve, reject) => {
+              const mod = siteUrl.startsWith("https") ? https : http;
+              mod.get(siteUrl, (resp) => {
+                if (resp.statusCode >= 300 && resp.statusCode < 400 && resp.headers.location) {
+                  mod.get(resp.headers.location, (r2) => {
+                    const c = []; r2.on("data", d => c.push(d)); r2.on("end", () => resolve(Buffer.concat(c).toString("utf8")));
+                  }).on("error", reject);
+                  return;
+                }
+                const c = []; resp.on("data", d => c.push(d)); resp.on("end", () => resolve(Buffer.concat(c).toString("utf8")));
+              }).on("error", reject);
+            });
+            const m = html.match(/const\s+ALL_DATA\s*=\s*(\{[\s\S]*?\});/);
+            if (m) {
+              const parsed = JSON.parse(m[1]);
+              for (let y = 1; y <= 10; y++) {
+                remoteByYear[y] = Array.isArray(parsed[y]) ? parsed[y] : [];
+              }
+              remoteCount = Object.values(remoteByYear).reduce((s, a) => s + a.length, 0);
+            }
+            for (let y = 1; y <= 10; y++) {
+              const lb = localByYear[y] && localByYear[y][0] ? localByYear[y][0].robustScore : null;
+              const rb = remoteByYear[y] && remoteByYear[y][0] ? remoteByYear[y][0].robustScore : null;
+              comparison.push({
+                year: y,
+                localBest: lb !== null ? Number(Number(lb).toFixed(4)) : null,
+                remoteBest: rb !== null ? Number(Number(rb).toFixed(4)) : null,
+                localCount: (localByYear[y] || []).length,
+                remoteCount: (remoteByYear[y] || []).length,
+                winner: lb === null && rb === null ? "none" : lb === null ? "remote" : rb === null ? "local" : lb >= rb ? "local" : "remote",
+              });
+            }
+          } catch (err) {
+            json(res, 500, { error: `拉取线上数据失败: ${err.message}` });
+            return;
+          }
+        }
+
+        // Merge: keep best per year
+        const mergedByYear = {};
+        for (let y = 1; y <= 10; y++) {
+          mergedByYear[y] = dedupeEntries(
+            [...(localByYear[y] || []), ...(remoteByYear[y] || [])],
+            (e) => JSON.stringify([e.robustScore, e.avgScore, e.minScore, e.maxScore, e.stdDev, e.weights, e.configs])
+          ).sort((a, b) => Number(b.robustScore) - Number(a.robustScore)).slice(0, 10);
+        }
+        const mergedCount = Object.values(mergedByYear).reduce((s, a) => s + a.length, 0);
+
+        // Generate static HTML
+        const staticHtml = buildStaticHtml(mergedByYear);
+        const outPath = path.resolve(process.cwd(), "index.html");
+        fs.writeFileSync(outPath, staticHtml, "utf8");
+
+        // Git commit & push
+        const { execSync } = require("child_process");
+        const cwd = process.cwd();
+        let pushed = false;
+        try {
+          execSync("git add index.html", { cwd });
+          execSync('git diff --cached --quiet index.html', { cwd });
+          // No changes — skip commit
+        } catch (_) {
+          // There are changes to commit
+          const msg = `更新排行榜 ${new Date().toISOString().slice(0, 16)}`;
+          execSync(`git commit -m "${msg}"`, { cwd });
+          try {
+            execSync("git push", { cwd, timeout: 30000 });
+            pushed = true;
+          } catch (pushErr) {
+            // push failed (no remote, auth, etc.)
+          }
+        }
+
+        json(res, 200, {
+          ok: true,
+          file: outPath,
+          localCount,
+          remoteCount,
+          mergedCount,
+          comparison,
+          pushed,
+        });
         return;
       }
 

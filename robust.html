@@ -22,7 +22,9 @@
     .good{color:var(--good)}
     .bad{color:var(--bad)}
     .layout{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    .table-wrap{max-height:500px;overflow:auto;border:1px solid var(--line);border-radius:14px;background:#fff}
+    .layout>.panel{margin-bottom:0}
+    .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:14px;background:#fff;max-height:420px}
+    .detail-col .detail{overflow:auto;max-height:420px}
     table{width:100%;border-collapse:collapse;font-size:13px}
     th,td{border-bottom:1px solid #eee4d3;padding:8px 6px;text-align:left}
     th{position:sticky;top:0;background:#fff;color:var(--muted)}
@@ -33,6 +35,7 @@
     .section{margin-top:14px}
     .section-title{font-size:13px;font-weight:700;margin:0 0 8px}
     .asset-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+    .asset-card.full-row{grid-column:1/-1}
     .asset-card{border:1px solid var(--line);border-radius:14px;padding:12px;background:#fffdfa}
     .asset-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}
     .asset-name{font-weight:700}
@@ -85,7 +88,7 @@
           </table>
         </div>
       </div>
-      <div>
+      <div class="detail-col">
         <div class="detail">
           <div class="k" style="margin-bottom:8px">各窗口回测结果</div>
           <div id="detail" class="detail-empty">点击任意一行查看窗口回测结果。</div>
@@ -184,11 +187,9 @@
         .replace(/'/g, "&#39;");
     }
 
-    function renderAssetCard(key, label, entry) {
+    function renderAmountCard(key, label, entry) {
       const cfg = (entry.configs || {})[key];
       if (!cfg) return "";
-      const showScheduleDays = cfg.scheduleMode === "every_n_days";
-      const showWeekday = cfg.scheduleMode === "weekly" || cfg.scheduleMode === "weekly_weekday";
       return `<div class="asset-card">
         <div class="asset-head">
           <div class="asset-name">${escapeHtml(label)}</div>
@@ -196,6 +197,20 @@
         <div class="asset-points">
           <div class="point"><strong>基础定投</strong> ${escapeHtml(cfg.baseAmount)}</div>
           <div class="point"><strong>回撤加仓</strong> ${escapeHtml(cfg.dipAmount)}</div>
+        </div>
+      </div>`;
+    }
+
+    function renderStrategyCard(entry) {
+      const cfg = (entry.configs || {})["au9999"] || (entry.configs || {})["csi300"] || (entry.configs || {})["sp500"];
+      if (!cfg) return "";
+      const showScheduleDays = cfg.scheduleMode === "every_n_days";
+      const showWeekday = cfg.scheduleMode === "weekly" || cfg.scheduleMode === "weekly_weekday";
+      return `<div class="asset-card full-row">
+        <div class="asset-head">
+          <div class="asset-name">策略参数（三资产共享）</div>
+        </div>
+        <div class="asset-points" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))">
           <div class="point"><strong>均线窗口</strong> ${escapeHtml(cfg.maWindow)} 日</div>
           <div class="point"><strong>定投频率</strong> ${escapeHtml(formatSchedule(cfg))}</div>
           <div class="point"><strong>频率模式</strong> ${escapeHtml(formatScheduleMode(cfg.scheduleMode))}</div>
@@ -242,9 +257,10 @@
     function renderParamsHtml(entry) {
       if (!entry) return '<div class="detail-empty">当前暂无策略参数。</div>';
       return `<div class="asset-grid">
-        ${renderAssetCard("au9999", "黄金 AU9999", entry)}
-        ${renderAssetCard("csi300", "沪深300", entry)}
-        ${renderAssetCard("sp500", "标普500", entry)}
+        ${renderAmountCard("au9999", "黄金 AU9999", entry)}
+        ${renderAmountCard("csi300", "沪深300", entry)}
+        ${renderAmountCard("sp500", "标普500", entry)}
+        ${renderStrategyCard(entry)}
       </div>`;
     }
 
@@ -321,7 +337,7 @@
 
     renderTabs();
     refresh();
-    setInterval(refresh, cloudMode ? 15000 : 5000);
+    setInterval(refresh, cloudMode ? 15000 : 2000);
   </script>
 </body>
 </html>

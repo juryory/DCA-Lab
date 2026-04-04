@@ -15,8 +15,8 @@ for (const key of ASSET_KEYS) {
 }
 
 let running = false;
-let batch = workerData.batch || 100;
-let penalty = workerData.penalty || 0.08;
+let batch = workerData.batch || 500;
+let penalty = workerData.penalty || 0.01;
 
 parentPort.on("message", (msg) => {
   if (msg.cmd === "start") {
@@ -83,11 +83,9 @@ const ELITE_SIZE = 20;
 const RANDOM_RATIO = 0.3; // 30% pure random, 70% breed from elites
 
 function pickElite() {
-  // Tournament selection: pick 3 random, return best
   const a = elitePool[Math.floor(Math.random() * elitePool.length)];
   const b = elitePool[Math.floor(Math.random() * elitePool.length)];
-  const c = elitePool[Math.floor(Math.random() * elitePool.length)];
-  return [a, b, c].sort((x, y) => y.score - x.score)[0];
+  return a.score >= b.score ? a : b;
 }
 
 function generateConfig() {

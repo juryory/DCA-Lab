@@ -53,9 +53,9 @@
     <div class="panel">
       <h3 class="title">稳健搜索</h3>
       <div class="row">
-        <label>每组窗口数: <input id="robustWindowCount" type="number" value="10" min="2" style="width:90px"></label>
-        <label>每轮抽样: <input id="robustBatch" type="number" value="50" min="1" style="width:90px"></label>
-        <label>惩罚权重: <input id="robustPenalty" type="number" value="0.08" step="0.01" style="width:90px"></label>
+        <label>每组窗口数: <input id="robustWindowCount" type="number" value="15" min="2" style="width:90px"></label>
+        <label>每轮抽样: <input id="robustBatch" type="number" value="200" min="1" style="width:90px"></label>
+        <label>惩罚权重: <input id="robustPenalty" type="number" value="0.01" step="0.01" style="width:90px"></label>
         <button class="primary" id="robustStartBtn">启动</button>
         <button id="robustStopBtn">停止</button>
       </div>
@@ -64,36 +64,21 @@
     </div>
 
     <div class="panel">
-      <h3 class="title">Cloudflare 上传</h3>
+      <h3 class="title">导出并推送</h3>
       <div class="row">
-        <label>API: <input id="cfApiUrl" type="text" placeholder="https://dcalab.juryory.com" style="width:320px"></label>
-        <label>Token: <input id="cfAdminToken" type="password" placeholder="Cloudflare ADMIN_TOKEN" style="width:240px"></label>
-        <label>频率:
-          <select id="cfInterval" style="width:120px">
-            <option value="10">10 分钟</option>
-            <option value="20">20 分钟</option>
-            <option value="30" selected>30 分钟</option>
-            <option value="60">60 分钟</option>
-          </select>
-        </label>
-        <button class="primary" id="cfUploadBtn">立即上传</button>
-        <button id="cfAutoStartBtn">启动自动上传</button>
-        <button id="cfAutoStopBtn">停止自动上传</button>
+        <label>线上页面: <input id="siteUrl" type="text" placeholder="https://dcalab.juryory.com" style="width:320px"></label>
+        <button class="primary" id="exportBtn">比对合并 & 推送到 GitHub</button>
       </div>
-      <div class="meta" style="margin-top:6px">立即上传会先拉取云端稳健榜，再与本地结果合并，保留每个窗口前 10 条后直接覆盖写回 Cloudflare。</div>
-      <div id="cfStatusText" class="meta" style="margin-top:6px">未配置。</div>
+      <div class="meta" style="margin-top:6px">生成 index.html → git commit & push → Cloudflare Pages 自动部署。如填写线上页面 URL，会先拉取现有数据与本地比对合并（每窗口保留前 10），首次推送可留空。</div>
+      <div id="exportStatus" class="meta" style="margin-top:6px"></div>
+      <pre id="exportCompare" style="display:none;margin:8px 0 0;padding:10px;background:#f8f0df;border-radius:10px;font-size:12px;overflow:auto;max-height:200px"></pre>
     </div>
   </div>
 
   <script>
     let adminToken = localStorage.getItem("dcalab_local_admin_token") || "";
-    const savedCfApiUrl = localStorage.getItem("dcalab_cf_api_url") || "";
-    const savedCfAdminToken = localStorage.getItem("dcalab_cf_admin_token") || "";
-    const savedCfInterval = localStorage.getItem("dcalab_cf_interval") || "";
-
-    if (savedCfApiUrl) cfApiUrl.value = savedCfApiUrl;
-    if (savedCfAdminToken) cfAdminToken.value = savedCfAdminToken;
-    if (savedCfInterval) cfInterval.value = savedCfInterval;
+    const savedSiteUrl = localStorage.getItem("dcalab_site_url") || "";
+    if (savedSiteUrl) siteUrl.value = savedSiteUrl;
     if (!adminToken) {
       adminToken = prompt("请输入本地管理员 Token") || "";
       if (adminToken) localStorage.setItem("dcalab_local_admin_token", adminToken);
@@ -128,22 +113,11 @@
           api("/api/admin/status"),
           api("/api/admin/robust/status"),
         ]);
-        statusText.textContent = `数据年份: ${status.minYear || "-"}-${status.maxYear || "-"} | 本地稳健结果: ${status.cloudSync?.robustEntries || 0} | 存储文件: ${status.storePath}`;
+        statusText.textContent = `数据年份: ${status.minYear || "-"}-${status.maxYear || "-"} | 存储文件: ${status.storePath}`;
 
         const tc = robustStatus.topCounts || {};
         const tcStr = Object.entries(tc).map(([y, c]) => `${y}年:${c}`).join(" ");
         robustStatusText.textContent = `运行状态: ${robustStatus.running ? "运行中" : "已停止"} | 尝试: ${robustStatus.attempts} | 有效: ${robustStatus.valid} | Worker: ${robustStatus.activeWorkers || 0}/${robustStatus.workerCount || 0} | 每组窗口数: ${robustStatus.windowCount} | 各窗口结果: ${tcStr || "-"}`;
-
-        const sync = status.cloudSync || robustStatus.cloudSync || {};
-        if (sync.apiUrl && !cfApiUrl.value) cfApiUrl.value = sync.apiUrl;
-        if (sync.intervalMinutes) cfInterval.value = String(sync.intervalMinutes);
-        const modeText = sync.enabled ? "自动同步已开启" : "自动同步未开启";
-        const runText = sync.running ? " | 本轮状态: 同步中" : " | 本轮状态: 空闲";
-        const last = sync.lastRunAt ? ` | 上次执行: ${sync.lastRunAt}` : "";
-        const lastResult = sync.lastResult && sync.lastResult.error
-          ? ` | 上次结果: 失败 (${sync.lastResult.error})`
-          : (sync.lastResult ? ` | 上次结果: 成功 (覆盖 robust ${sync.lastResult.robustSubmitted || 0} 条)` : "");
-        cfStatusText.textContent = `同步模式: ${modeText}${runText} | Token: ${sync.hasAdminToken ? "已保存到服务内存" : "未提供"} | 本地结果: robust ${sync.robustEntries || 0}${last}${lastResult}`;
       } catch (err) {
         statusText.textContent = `刷新失败: ${err.message}`;
       }
@@ -171,7 +145,7 @@
         await api("/api/admin/robust/start", "POST", {
           windowCount: Number(robustWindowCount.value) || 10,
           batch: Number(robustBatch.value) || 50,
-          penalty: Number(robustPenalty.value) || 0.08,
+          penalty: Number(robustPenalty.value) || 0.01,
         });
         robustStatusText.textContent = "稳健搜索已启动。";
         refresh();
@@ -190,53 +164,36 @@
       }
     };
 
-    function getCfSettings() {
-      const apiUrl = String(cfApiUrl.value || "").trim().replace(/\/$/, "");
-      const adminToken = String(cfAdminToken.value || "").trim();
-      const intervalMinutes = Number(cfInterval.value || 30);
-      if (!apiUrl) throw new Error("请先填写 Cloudflare Worker API");
-      if (!adminToken) throw new Error("请先填写 Cloudflare ADMIN_TOKEN");
-      localStorage.setItem("dcalab_cf_api_url", apiUrl);
-      localStorage.setItem("dcalab_cf_admin_token", adminToken);
-      localStorage.setItem("dcalab_cf_interval", String(intervalMinutes));
-      return { apiUrl, adminToken, intervalMinutes };
-    }
-
-    cfUploadBtn.onclick = async () => {
+    exportBtn.onclick = async () => {
+      exportStatus.textContent = "正在处理...";
+      exportCompare.style.display = "none";
       try {
-        const settings = getCfSettings();
-        const out = await api("/api/admin/cloudflare/upload", "POST", settings);
-        const r = out.result || {};
-        cfStatusText.textContent = `覆盖完成: 云端 ${r.remoteCount || 0} 条 + 本地 ${r.localCount || 0} 条 -> 保留 ${r.robustSubmitted || 0} 条`;
-        refresh();
+        const url = String(siteUrl.value || "").trim().replace(/\/$/, "");
+        if (url) localStorage.setItem("dcalab_site_url", url);
+        const out = await api("/api/admin/export-static", "POST", { siteUrl: url });
+        let msg = `本地 ${out.localCount} 条`;
+        if (out.remoteCount > 0) msg += ` + 线上 ${out.remoteCount} 条`;
+        msg += ` → 合并 ${out.mergedCount} 条`;
+        if (out.pushed) msg += ` | 已推送到 GitHub`;
+        else msg += ` | 已生成 ${out.file}（无远程仓库，未推送）`;
+        exportStatus.textContent = msg;
+        if (out.comparison && out.comparison.length) {
+          const lines = ["窗口  本地最佳    线上最佳    本地数  线上数  胜出"];
+          for (const c of out.comparison) {
+            const lb = c.localBest !== null ? String(c.localBest).padStart(10) : "       N/A";
+            const rb = c.remoteBest !== null ? String(c.remoteBest).padStart(10) : "       N/A";
+            lines.push(`${String(c.year).padStart(2)}Y  ${lb}  ${rb}  ${String(c.localCount).padStart(6)}  ${String(c.remoteCount).padStart(6)}  ${c.winner}`);
+          }
+          exportCompare.textContent = lines.join("\n");
+          exportCompare.style.display = "block";
+        }
       } catch (err) {
-        cfStatusText.textContent = `上传失败: ${err.message}`;
-      }
-    };
-
-    cfAutoStartBtn.onclick = async () => {
-      try {
-        const settings = getCfSettings();
-        await api("/api/admin/cloudflare/auto-start", "POST", settings);
-        cfStatusText.textContent = `自动上传已启动，每 ${settings.intervalMinutes} 分钟一次。`;
-        refresh();
-      } catch (err) {
-        cfStatusText.textContent = `启动失败: ${err.message}`;
-      }
-    };
-
-    cfAutoStopBtn.onclick = async () => {
-      try {
-        await api("/api/admin/cloudflare/auto-stop", "POST", {});
-        cfStatusText.textContent = "自动上传已停止。";
-        refresh();
-      } catch (err) {
-        cfStatusText.textContent = `停止失败: ${err.message}`;
+        exportStatus.textContent = `失败: ${err.message}`;
       }
     };
 
     refresh();
-    setInterval(refresh, 5000);
+    setInterval(refresh, 2000);
   </script>
 </body>
 </html>

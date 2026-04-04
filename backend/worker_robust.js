@@ -15,9 +15,9 @@ for (const key of ASSET_KEYS) {
 }
 
 let running = false;
-let batch = workerData.batch || 50;
-let penalty = workerData.penalty || 0.08;
-let windowCount = workerData.windowCount || 10;
+let batch = workerData.batch || 200;
+let penalty = workerData.penalty || 0.01;
+let windowCount = workerData.windowCount || 15;
 
 parentPort.on("message", (msg) => {
   if (msg.cmd === "start") {
@@ -132,8 +132,7 @@ const RANDOM_RATIO = 0.3;
 function pickElite(pool) {
   const a = pool[Math.floor(Math.random() * pool.length)];
   const b = pool[Math.floor(Math.random() * pool.length)];
-  const c = pool[Math.floor(Math.random() * pool.length)];
-  return [a, b, c].sort((x, y) => y.robustScore - x.robustScore)[0];
+  return a.robustScore >= b.robustScore ? a : b;
 }
 
 function generateConfig(yr) {

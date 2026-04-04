@@ -80,13 +80,17 @@
       lines.push(`黄金AU9999: ${((weights.au9999 || 0) * 100).toFixed(0)}%`);
       lines.push(`沪深300: ${((weights.csi300 || 0) * 100).toFixed(0)}%`);
       lines.push(`标普500: ${((weights.sp500 || 0) * 100).toFixed(0)}%`);
+      // Per-asset amounts
+      for (const [key, label] of [["au9999","黄金AU9999"],["csi300","沪深300"],["sp500","标普500"]]) {
+        const c = configs[key];
+        if (!c) continue;
+        lines.push(`${label}: 基础定投 ${c.baseAmount} / 回撤加仓 ${c.dipAmount}`);
+      }
       lines.push("");
-      for (const key of ["au9999", "csi300", "sp500"]) {
-        const cfg = configs[key];
-        if (!cfg) continue;
-        lines.push(key.toUpperCase());
-        lines.push(`baseAmount: ${cfg.baseAmount}`);
-        lines.push(`dipAmount: ${cfg.dipAmount}`);
+      // Shared strategy params
+      const cfg = configs["au9999"] || configs["csi300"] || configs["sp500"];
+      if (cfg) {
+        lines.push("策略参数（三资产共享）");
         lines.push(`maWindow: ${cfg.maWindow}`);
         lines.push(`scheduleMode: ${cfg.scheduleMode}`);
         lines.push(`scheduleDays: ${cfg.scheduleDays ?? "-"}`);
@@ -210,7 +214,7 @@
     };
 
     load();
-    setInterval(load, cloudMode ? 15000 : 5000);
+    setInterval(load, cloudMode ? 15000 : 2000);
   </script>
 </body>
 </html>
